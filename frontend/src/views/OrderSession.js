@@ -10,7 +10,7 @@ import {
   getOrder,
   requestBill,
 } from "../lib/api";
-import { loadSession, clearSession } from "../lib/session";
+import { loadSession, clearSession, loadOrderIds, saveOrderIds } from "../lib/session";
 import { createStompClient } from "../lib/ws";
 import { toast } from "sonner";
 import {
@@ -35,19 +35,23 @@ import {
 
 const STATUS_COLORS = {
   PENDING: "bg-slate-100 text-slate-700",
+  PLACED: "bg-slate-100 text-slate-700",
   CONFIRMED: "bg-blue-100 text-blue-700",
   PREPARING: "bg-amber-100 text-amber-800",
   READY: "bg-emerald-100 text-emerald-800",
   SERVED: "bg-successc/15 text-successc",
+  BILL_REQUESTED: "bg-orange-100 text-orange-700",
   CANCELLED: "bg-red-100 text-red-700 line-through",
 };
 
 const STATUS_ICON = {
   PENDING: ClipboardList,
+  PLACED: ClipboardList,
   CONFIRMED: CheckCircle2,
   PREPARING: ChefHat,
   READY: Bell,
   SERVED: CheckCircle2,
+  BILL_REQUESTED: Receipt,
   CANCELLED: XCircle,
 };
 
@@ -63,6 +67,30 @@ export default function OrderSession() {
   const [showConfirmBill, setShowConfirmBill] = useState(false);
   const [pinCopied, setPinCopied] = useState(false);
   const cartRef = useRef(null);
+  const ordersIdsRef = useRef(new Set(loadOrderIds()));
+
+  // Detect if a session-close error means we should kick to landing
+  const handleSessionEnded = useCallback(
+    (err) => {
+      const status = err?.status;
+      const msg = (err?.message || "").toLowerCase();
+      const looksClosed =
+        status === 404 ||
+        status === 410 ||
+        msg.includes("closed") ||
+        msg.includes("session over") ||
+        msg.includes("no active session") ||
+        msg.includes("session not found");
+      if (looksClosed) {
+        toast.success("Your session has ended. Thanks for visiting!");
+        clearSession();
+        nav(sess?.qrToken ? `/?qr=${encodeURIComponent(sess.qrToken)}` : "/");
+        return true;
+      }
+      return false;
+    },
+    [nav, sess?.qrToken]
+  );
 
   const refreshCart = useCallback(async () => {
     if (!sess?.sessionToken) return;
@@ -70,25 +98,28 @@ export default function OrderSession() {
       const c = await getCart(sess.sessionToken);
       setCart(c);
     } catch (e) {
+      if (handleSessionEnded(e)) return;
       toast.error(e.message);
     }
-  }, [sess?.sessionToken]);
+  }, [sess?.sessionToken, handleSessionEnded]);
 
   const refreshOrders = useCallback(async () => {
-    // We track order ids we've seen
     const ids = ordersIdsRef.current;
     if (ids.size === 0) return;
     try {
       const fresh = await Promise.all([...ids].map((id) => getOrder(id).catch(() => null)));
-      setOrders(fresh.filter(Boolean).sort((a, b) => b.id - a.id));
+      const alive = fresh.filter(Boolean).sort((a, b) => b.id - a.id);
+      setOrders(alive);
+      // Prune ids that no longer resolve
+      const aliveIds = new Set(alive.map((o) => o.id));
+      ordersIdsRef.current = aliveIds;
+      saveOrderIds([...aliveIds]);
     } catch (e) {
       /* handled in interceptor */
     }
   }, []);
 
-  const ordersIdsRef = useRef(new Set());
-
-  // Initial load: session guard + menu + cart
+  // Initial load: session guard + menu + cart + hydrate orders from persisted ids
   useEffect(() => {
     if (!sess?.sessionToken) {
       nav("/");
@@ -98,7 +129,8 @@ export default function OrderSession() {
       .then(setMenu)
       .catch((e) => toast.error(e.message));
     refreshCart();
-  }, [nav, sess?.sessionToken, refreshCart]);
+    refreshOrders();
+  }, [nav, sess?.sessionToken, refreshCart, refreshOrders]);
 
   // WebSocket subscriptions with REST reconciliation on connect / visibility / online
   useEffect(() => {
@@ -124,6 +156,7 @@ export default function OrderSession() {
             } else {
               // submitted order broadcast
               ordersIdsRef.current.add(payload.id);
+              saveOrderIds([...ordersIdsRef.current]);
               setOrders((prev) => {
                 const others = prev.filter((o) => o.id !== payload.id);
                 return [payload, ...others].sort((a, b) => b.id - a.id);
@@ -136,12 +169,20 @@ export default function OrderSession() {
           handler: (payload) => {
             if (!payload) return;
             ordersIdsRef.current.add(payload.id);
+            saveOrderIds([...ordersIdsRef.current]);
             setOrders((prev) => {
               const others = prev.filter((o) => o.id !== payload.id);
               return [payload, ...others].sort((a, b) => b.id - a.id);
             });
             if (payload.status === "READY") {
               toast.success("An item is ready!");
+            }
+            if (payload.status === "BILL_REQUESTED") {
+              toast.info("Bill requested — waiting for the cashier");
+            }
+            if (payload.status === "SERVED") {
+              // Might indicate a revert from BILL_REQUESTED
+              toast.success("You can keep ordering — bill request cancelled");
             }
           },
         },
@@ -159,6 +200,14 @@ export default function OrderSession() {
       window.removeEventListener("online", reconcile);
     };
   }, [sess?.sessionId, refreshCart, refreshOrders]);
+
+  // When bill is requested, force any user viewing the cart tab back to menu.
+  const billRequested = orders.some((o) => o.status === "BILL_REQUESTED");
+  useEffect(() => {
+    if (billRequested) {
+      setActiveTab((tab) => (tab === "cart" ? "menu" : tab));
+    }
+  }, [billRequested]);
 
   if (!sess) return null;
 
@@ -182,6 +231,7 @@ export default function OrderSession() {
       setCart(updated);
       toast.success(existing ? "Quantity updated" : "Added to cart");
     } catch (e) {
+      if (handleSessionEnded(e)) return;
       toast.error(e.message);
     } finally {
       setBusyId(null);
@@ -190,13 +240,13 @@ export default function OrderSession() {
 
   const handleQty = async (item, delta) => {
     const newQty = (item.quantity || 0) + delta;
-    // Guardrail — UI should already disable this, but never hit remove via -.
     if (newQty < 1) return;
     setBusyId(`qty-${item.id}`);
     try {
       const c = await updateCartItem(sess.sessionToken, item.id, { quantity: newQty });
       setCart(c);
     } catch (e) {
+      if (handleSessionEnded(e)) return;
       toast.error(e.message);
     } finally {
       setBusyId(null);
@@ -208,6 +258,7 @@ export default function OrderSession() {
       const c = await updateCartItem(sess.sessionToken, item.id, { notes });
       setCart(c);
     } catch (e) {
+      if (handleSessionEnded(e)) return;
       toast.error(e.message);
     }
   };
@@ -219,6 +270,7 @@ export default function OrderSession() {
       setCart(c);
       toast.success("Removed");
     } catch (e) {
+      if (handleSessionEnded(e)) return;
       toast.error(e.message);
     } finally {
       setBusyId(null);
@@ -231,11 +283,13 @@ export default function OrderSession() {
     try {
       const placed = await submitCart(sess.sessionToken);
       ordersIdsRef.current.add(placed.id);
+      saveOrderIds([...ordersIdsRef.current]);
       setOrders((prev) => [placed, ...prev.filter((o) => o.id !== placed.id)]);
       toast.success(`Order #${placed.id} placed!`);
       await refreshCart();
       setActiveTab("track");
     } catch (e) {
+      if (handleSessionEnded(e)) return;
       toast.error(e.message);
     } finally {
       setSubmitBusy(false);
@@ -248,6 +302,7 @@ export default function OrderSession() {
       toast.success("Bill requested. The cashier will bring it shortly.");
       setShowConfirmBill(false);
     } catch (e) {
+      if (handleSessionEnded(e)) return;
       toast.error(e.message);
     }
   };
@@ -308,19 +363,29 @@ export default function OrderSession() {
         {/* Tabs */}
         <div className="max-w-3xl mx-auto px-4 pb-2 flex gap-1">
           {[
-            { id: "menu", label: "Menu", icon: ShoppingBag },
-            { id: "cart", label: `Cart (${cartCount})`, icon: ClipboardList },
-            { id: "track", label: `Orders (${orders.length})`, icon: ChefHat },
+            { id: "menu", label: "Menu", icon: ShoppingBag, disabled: false },
+            {
+              id: "cart",
+              label: `Cart (${cartCount})`,
+              icon: ClipboardList,
+              disabled: billRequested,
+            },
+            { id: "track", label: `Orders (${orders.length})`, icon: ChefHat, disabled: false },
           ].map((t) => {
             const Icon = t.icon;
+            const isDisabled = t.disabled;
             return (
               <button
                 key={t.id}
-                onClick={() => setActiveTab(t.id)}
+                onClick={() => !isDisabled && setActiveTab(t.id)}
+                disabled={isDisabled}
                 data-testid={`tab-${t.id}`}
+                title={isDisabled ? "Bill has been requested" : undefined}
                 className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-full text-sm font-medium transition-all ${
                   activeTab === t.id
                     ? "bg-brand text-white shadow-soft"
+                    : isDisabled
+                    ? "text-ink2/40 cursor-not-allowed"
                     : "text-ink2 hover:bg-bg2/60"
                 }`}
               >
@@ -332,8 +397,34 @@ export default function OrderSession() {
         </div>
       </header>
 
+      {/* Elegant "bill requested" banner */}
+      {billRequested && (
+        <div
+          data-testid="bill-requested-banner"
+          className="sticky top-[104px] z-30 max-w-3xl mx-auto px-4 pt-4 animate-fadeUp"
+        >
+          <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-soft">
+            <div className="h-9 w-9 rounded-full bg-amber-100 grid place-items-center shrink-0">
+              <Receipt size={16} className="text-amber-700" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-heading font-semibold text-amber-900">
+                Bill on its way
+              </div>
+              <p className="text-sm text-amber-800/80 leading-snug mt-0.5">
+                Your bill has been requested. Ordering is paused while the cashier prepares it —
+                feel free to keep browsing the menu. If you'd like to add more, ask a waiter to
+                send it back.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="max-w-3xl mx-auto px-4 pt-6">
-        {activeTab === "menu" && <MenuView menu={menu} onAdd={handleAdd} busyId={busyId} />}
+        {activeTab === "menu" && (
+          <MenuView menu={menu} onAdd={handleAdd} busyId={busyId} disabled={billRequested} />
+        )}
         {activeTab === "cart" && (
           <CartView
             cartRef={cartRef}
@@ -348,7 +439,7 @@ export default function OrderSession() {
       </main>
 
       {/* Sticky footer actions */}
-      {activeTab === "cart" && cart?.items?.length > 0 && (
+      {activeTab === "cart" && !billRequested && cart?.items?.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 z-30 glass border-t border-white/40">
           <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
             <div>
@@ -368,7 +459,7 @@ export default function OrderSession() {
         </div>
       )}
 
-      {activeTab === "track" && orders.length > 0 && (
+      {activeTab === "track" && !billRequested && orders.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 z-30 glass border-t border-white/40">
           <div className="max-w-3xl mx-auto px-4 py-3">
             <button
@@ -413,7 +504,7 @@ export default function OrderSession() {
 
 // ---------- Sub-components ----------
 
-function MenuView({ menu, onAdd, busyId }) {
+function MenuView({ menu, onAdd, busyId, disabled }) {
   if (!menu.length) {
     return <EmptyState icon={ShoppingBag} title="Loading menu…" />;
   }
@@ -428,7 +519,13 @@ function MenuView({ menu, onAdd, busyId }) {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {cat.items?.map((it) => (
-              <MenuItemCard key={it.id} item={it} onAdd={onAdd} busyId={busyId} />
+              <MenuItemCard
+                key={it.id}
+                item={it}
+                onAdd={onAdd}
+                busyId={busyId}
+                disabled={disabled}
+              />
             ))}
           </div>
         </section>
@@ -437,9 +534,10 @@ function MenuView({ menu, onAdd, busyId }) {
   );
 }
 
-function MenuItemCard({ item, onAdd, busyId }) {
+function MenuItemCard({ item, onAdd, busyId, disabled }) {
   const isAdding = busyId === `add-${item.id}`;
   const hasImage = !!item.imageUrl;
+  const btnDisabled = !item.available || isAdding || disabled;
   return (
     <div
       data-testid={`menu-item-${item.id}`}
@@ -474,9 +572,10 @@ function MenuItemCard({ item, onAdd, busyId }) {
         )}
         <button
           onClick={() => onAdd(item.id)}
-          disabled={!item.available || isAdding}
+          disabled={btnDisabled}
           data-testid={`add-to-cart-btn-${item.id}`}
-          className="absolute bottom-3 right-3 h-10 w-10 grid place-items-center rounded-full bg-brand hover:bg-brandHover text-white shadow-lift disabled:opacity-40 disabled:cursor-not-allowed transition-all group-hover:scale-110"
+          title={disabled ? "Bill has been requested" : undefined}
+          className="absolute bottom-3 right-3 h-10 w-10 grid place-items-center rounded-full bg-brand hover:bg-brandHover text-white shadow-lift disabled:opacity-40 disabled:cursor-not-allowed transition-all group-hover:scale-110 disabled:group-hover:scale-100"
         >
           {isAdding ? (
             <Loader2 size={16} className="animate-spin" />

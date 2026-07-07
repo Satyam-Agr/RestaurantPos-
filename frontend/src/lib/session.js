@@ -1,6 +1,7 @@
 // LocalStorage helpers for customer session persistence
 const SESSION_KEY = "trattoria_session";
 const CUSTOMER_KEY = "trattoria_customer";
+const ORDER_IDS_KEY = "trattoria_order_ids";
 const CUSTOMER_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // --- Session (per-table order list) ---
@@ -16,7 +17,24 @@ export const loadSession = () => {
   }
 };
 
-export const clearSession = () => localStorage.removeItem(SESSION_KEY);
+export const clearSession = () => {
+  localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(ORDER_IDS_KEY);
+};
+
+// --- Order IDs per session (used for reconciliation across refreshes) ---
+export const loadOrderIds = () => {
+  try {
+    const raw = localStorage.getItem(ORDER_IDS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveOrderIds = (ids) => {
+  localStorage.setItem(ORDER_IDS_KEY, JSON.stringify([...new Set(ids)]));
+};
 
 // --- Customer identity (30-day cached) ---
 export const saveCustomer = (raw) => {
