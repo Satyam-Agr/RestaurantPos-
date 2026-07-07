@@ -4,6 +4,7 @@ import com.restro.backend.domain.PaymentMethod;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 public record BillResponse(
         Long id,
@@ -14,6 +15,7 @@ public record BillResponse(
         BigDecimal total,
         PaymentMethod paymentMethod,
         Instant generatedAt,
-        Instant paidAt
+        Instant paidAt,
+        List<BillLineItemResponse> items
 ) {
 }

@@ -1,6 +1,7 @@
 package com.restro.backend.service;
 
 import com.restro.backend.domain.*;
+import com.restro.backend.dto.BillLineItemResponse;
 import com.restro.backend.dto.BillRequestSummary;
 import com.restro.backend.dto.BillResponse;
 import com.restro.backend.dto.CashierNotice;
@@ -15,6 +16,7 @@ import com.restro.backend.repository.RestaurantTableRepository;
 import com.restro.backend.repository.TableSessionRepository;
 import com.restro.backend.ws.OrderEventBroadcaster;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,6 +41,9 @@ public class BillService {
     private final OrderService orderService;
     private final OrderMapper orderMapper;
     private final OrderEventBroadcaster broadcaster;
+
+    @Value("${app.billing.free-table-on-generate}")
+    private boolean freeTableOnGenerate;
 
     @Transactional
     public void requestBill(String sessionToken) {
@@ -99,10 +104,17 @@ public class BillService {
         TableSession session = tableSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new NotFoundException("Session " + sessionId + " not found"));
 
-        List<CustomerOrder> orders = customerOrderRepository.findAllByTableSessionAndStatusNotIn(session, EXCLUDED_FROM_BILLING);
-        BigDecimal subtotal = orders.stream()
+        List<CustomerOrder> billableOrders = customerOrderRepository.findAllByTableSessionAndStatusNotIn(session, EXCLUDED_FROM_BILLING);
+        if (billableOrders.isEmpty()) {
+            throw new ConflictException("No billable orders found for this session — either nothing was served, or the bill was already generated");
+        }
+
+        List<OrderItem> billableItems = billableOrders.stream()
                 .flatMap(o -> o.getItems().stream())
                 .filter(item -> item.getItemStatus() != ItemStatus.CANCELLED)
+                .toList();
+
+        BigDecimal subtotal = billableItems.stream()
                 .map(item -> item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
@@ -117,7 +129,23 @@ public class BillService {
         bill.setDiscount(discount);
         bill.setTotal(total);
         bill.setGeneratedAt(Instant.now());
+        for (OrderItem item : billableItems) {
+            bill.getLineItems().add(BillLineItem.builder()
+                    .bill(bill)
+                    .menuItemName(item.getMenuItem().getName())
+                    .quantity(item.getQuantity())
+                    .unitPrice(item.getUnitPrice())
+                    .lineTotal(item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
+                    .build());
+        }
         bill = billRepository.save(bill);
+
+        if (freeTableOnGenerate) {
+            closeSessionAndFreeTable(session);
+        }
+
+        List<CustomerOrder> allSessionOrders = customerOrderRepository.findAllByTableSessionOrderByPlacedAtAsc(session);
+        customerOrderRepository.deleteAll(allSessionOrders);
 
         BillResponse response = toResponse(bill);
         broadcaster.notifyCashier(new CashierNotice("BILL_GENERATED", session.getId(), session.getTable().getTableNumber(), response));
@@ -138,14 +166,16 @@ public class BillService {
         billRepository.save(bill);
 
         TableSession session = bill.getTableSession();
-        List<CustomerOrder> orders = customerOrderRepository.findAllByTableSessionAndStatusNotIn(session, EXCLUDED_FROM_BILLING);
-        for (CustomerOrder order : orders) {
-            OrderStatus previous = order.getStatus();
-            order.setStatus(OrderStatus.PAID);
-            customerOrderRepository.save(order);
-            orderService.logEvent(order, previous, OrderStatus.PAID, cashier);
+        if (session.getStatus() != SessionStatus.CLOSED) {
+            closeSessionAndFreeTable(session);
         }
 
+        BillResponse response = toResponse(bill);
+        broadcaster.notifyCashier(new CashierNotice("BILL_PAID", session.getId(), session.getTable().getTableNumber(), response));
+        return response;
+    }
+
+    private void closeSessionAndFreeTable(TableSession session) {
         session.setStatus(SessionStatus.CLOSED);
         session.setClosedAt(Instant.now());
         tableSessionRepository.save(session);
@@ -153,10 +183,6 @@ public class BillService {
         RestaurantTable table = session.getTable();
         table.setStatus(TableStatus.AVAILABLE);
         restaurantTableRepository.save(table);
-
-        BillResponse response = toResponse(bill);
-        broadcaster.notifyCashier(new CashierNotice("BILL_PAID", session.getId(), table.getTableNumber(), response));
-        return response;
     }
 
     @Transactional(readOnly = true)
@@ -165,6 +191,9 @@ public class BillService {
     }
 
     private BillResponse toResponse(Bill bill) {
+        List<BillLineItemResponse> items = bill.getLineItems().stream()
+                .map(li -> new BillLineItemResponse(li.getMenuItemName(), li.getQuantity(), li.getUnitPrice(), li.getLineTotal()))
+                .toList();
         return new BillResponse(
                 bill.getId(),
                 bill.getTableSession().getId(),
@@ -174,7 +203,8 @@ public class BillService {
                 bill.getTotal(),
                 bill.getPaymentMethod(),
                 bill.getGeneratedAt(),
-                bill.getPaidAt()
+                bill.getPaidAt(),
+                items
         );
     }
 }

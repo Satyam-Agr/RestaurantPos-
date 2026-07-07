@@ -79,6 +79,9 @@ public class OrderService {
         if (KITCHEN_VISIBLE_STATUSES.contains(order.getStatus())) {
             broadcaster.notifyKitchen(response);
         }
+        if(order.getStatus().equals(OrderStatus.READY)) {
+            broadcaster.notifyWaiter(response);
+        }
         broadcaster.notifyTable(order.getTableSession().getId(), response);
         return response;
     }
@@ -159,7 +162,7 @@ public class OrderService {
 
     void logEvent(CustomerOrder order, OrderStatus from, OrderStatus to, StaffUser staff) {
         orderStatusEventRepository.save(OrderStatusEvent.builder()
-                .order(order)
+                .orderId(order.getId())
                 .fromStatus(from)
                 .toStatus(to)
                 .changedBy(staff)

@@ -4,6 +4,7 @@ public record SessionResponse(
         Long sessionId,
         String sessionToken,
         String tableNumber,
-        String pin
+        String pin,
+        String qrToken
 ) {
 }

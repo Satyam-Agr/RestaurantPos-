@@ -1,6 +1,7 @@
 package com.restro.backend.controller;
 
 import com.restro.backend.dto.JoinSessionRequest;
+import com.restro.backend.dto.OrderResponse;
 import com.restro.backend.dto.SessionResponse;
 import com.restro.backend.dto.SessionStatusResponse;
 import com.restro.backend.security.CustomerPrincipal;
@@ -9,6 +10,8 @@ import com.restro.backend.service.SessionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/sessions")
@@ -21,6 +24,11 @@ public class SessionController {
     @GetMapping("/status/{qrToken}")
     public SessionStatusResponse status(@PathVariable String qrToken) {
         return sessionService.getStatus(qrToken);
+    }
+
+    @GetMapping("/{sessionToken}/orders")
+    public List<OrderResponse> getOrders(@PathVariable String sessionToken) {
+        return sessionService.getOrders(sessionToken);
     }
 
     @PostMapping("/create/{qrToken}")
@@ -38,7 +46,7 @@ public class SessionController {
             @RequestHeader(value = "Authorization", required = false) String authHeader,
             @Valid @RequestBody JoinSessionRequest request
     ) {
-        customerTokenService.parseBearerToken(authHeader);
-        return sessionService.joinSession(qrToken, request.pin());
+        CustomerPrincipal customer = customerTokenService.parseBearerToken(authHeader);
+        return sessionService.joinSession(qrToken, request.pin(), customer.customerId());
     }
 }

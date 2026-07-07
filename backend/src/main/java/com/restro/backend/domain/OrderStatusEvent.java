@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 
+// order_id is a plain reference, not a live FK — order rows get deleted once billed, this log must outlive them.
 @Entity
 @Table(name = "order_status_event")
 @Data
@@ -20,9 +21,8 @@ public class OrderStatusEvent {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "order_id", nullable = false)
-    private CustomerOrder order;
+    @Column(name = "order_id", nullable = false)
+    private Long orderId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "from_status")

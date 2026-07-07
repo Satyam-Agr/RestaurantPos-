@@ -22,3 +22,9 @@ app:
     secret: ${JWT_SECRET:change-this-to-a-long-random-secret-in-production-min-32-bytes}
     expiration-ms: ${JWT_EXPIRATION_MS:28800000}
     customer-expiration-ms: ${CUSTOMER_JWT_EXPIRATION_MS:2592000000}
+  billing:
+    # Controls WHEN a table becomes bookable again and the session officially ends, relative to billing.
+    #   true  = happens as soon as the cashier GENERATES the bill (before payment is collected)
+    #   false = happens only once the cashier marks the bill PAID
+    # Flip this line to switch behavior; no code changes needed.
+    free-table-on-generate: ${FREE_TABLE_ON_GENERATE:true}
