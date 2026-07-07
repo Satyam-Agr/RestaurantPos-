@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { createSession, getSessionStatus, joinSession } from "../lib/api";
-import { saveSession, loadCustomer, clearCustomer } from "../lib/session";
+import { createSession, getSessionStatus, joinSession, customerLogout } from "../lib/api";
+import { saveSession, loadCustomer, clearCustomer, clearSession } from "../lib/session";
 import { toast } from "sonner";
-import { KeyRound, Sparkles, Users, ArrowRight, Loader2 } from "lucide-react";
+import { KeyRound, Sparkles, Users, ArrowRight, Loader2, LogOut } from "lucide-react";
 
 export default function TableAccess() {
   const [params] = useSearchParams();
@@ -14,6 +14,24 @@ export default function TableAccess() {
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [signingOut, setSigningOut] = useState(false);
+
+  const customer = loadCustomer();
+
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    try {
+      await customerLogout().catch(() => {});
+    } finally {
+      clearCustomer();
+      clearSession();
+      toast.success("Signed out");
+      // Stay on this page but force phone-entry flow to re-run
+      nav(`/?qr=${encodeURIComponent(qr)}`, { replace: true });
+      // Reload to guarantee no stale in-memory state
+      setTimeout(() => window.location.reload(), 50);
+    }
+  };
 
   useEffect(() => {
     if (!qr) {
@@ -173,6 +191,32 @@ export default function TableAccess() {
             >
               {busy ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
               Create Order List
+            </button>
+          </div>
+        )}
+
+        {/* Signed-in badge + sign-out link */}
+        {customer?.phoneNumber && (
+          <div className="mt-6 flex items-center justify-center gap-2 text-xs text-ink2 animate-fadeUp">
+            <span>
+              Signed in as{" "}
+              <span className="font-mono text-ink font-semibold">
+                +91 {customer.phoneNumber}
+              </span>
+            </span>
+            <span className="text-ink2/40">·</span>
+            <button
+              onClick={handleSignOut}
+              disabled={signingOut}
+              data-testid="table-access-signout"
+              className="inline-flex items-center gap-1 text-destructive hover:underline disabled:opacity-50"
+            >
+              {signingOut ? (
+                <Loader2 size={11} className="animate-spin" />
+              ) : (
+                <LogOut size={11} />
+              )}
+              Sign out
             </button>
           </div>
         )}
