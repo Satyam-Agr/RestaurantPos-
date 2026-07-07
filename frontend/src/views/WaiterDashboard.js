@@ -19,6 +19,8 @@ import {
   Plus,
   Minus,
   RefreshCw,
+  AlertTriangle,
+  X,
 } from "lucide-react";
 
 export default function WaiterDashboard() {
@@ -26,6 +28,7 @@ export default function WaiterDashboard() {
   const [ready, setReady] = useState([]);
   const [busy, setBusy] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(null); // { orderId, item }
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -102,9 +105,11 @@ export default function WaiterDashboard() {
 
   const changeQty = async (orderId, item, delta) => {
     const newQty = (item.quantity || 0) + delta;
-    if (newQty <= 0) return removeItem(orderId, item.id);
+    // Guardrail: never remove via decrement — must use trash button (with confirm).
+    if (newQty < 1) return;
     setBusy(`q-${item.id}`);
     try {
+      // PATCH /api/waiter/orders/{orderId}/items/{itemId} with { quantity }
       await waiterUpdateItem(orderId, item.id, { quantity: newQty });
       refresh();
     } catch (e) {
@@ -112,6 +117,13 @@ export default function WaiterDashboard() {
     } finally {
       setBusy(null);
     }
+  };
+
+  const confirmAndRemove = async () => {
+    if (!confirmRemove) return;
+    const { orderId, item } = confirmRemove;
+    setConfirmRemove(null);
+    await removeItem(orderId, item.id);
   };
 
   return (
@@ -154,9 +166,10 @@ export default function WaiterDashboard() {
                     <div className="flex items-center gap-0.5 bg-bg rounded-full px-1 py-0.5">
                       <button
                         onClick={() => changeQty(o.id, it, -1)}
-                        disabled={busy === `q-${it.id}`}
+                        disabled={busy === `q-${it.id}` || it.quantity <= 1}
+                        title={it.quantity <= 1 ? "Use trash icon to remove" : undefined}
                         data-testid={`w-dec-${it.id}`}
-                        className="h-6 w-6 grid place-items-center rounded-full hover:bg-bg2"
+                        className="h-6 w-6 grid place-items-center rounded-full hover:bg-bg2 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                       >
                         <Minus size={12} />
                       </button>
@@ -165,13 +178,13 @@ export default function WaiterDashboard() {
                         onClick={() => changeQty(o.id, it, +1)}
                         disabled={busy === `q-${it.id}`}
                         data-testid={`w-inc-${it.id}`}
-                        className="h-6 w-6 grid place-items-center rounded-full hover:bg-bg2"
+                        className="h-6 w-6 grid place-items-center rounded-full hover:bg-bg2 disabled:opacity-30"
                       >
                         <Plus size={12} />
                       </button>
                     </div>
                     <button
-                      onClick={() => removeItem(o.id, it.id)}
+                      onClick={() => setConfirmRemove({ orderId: o.id, item: it })}
                       disabled={busy === `r-${it.id}`}
                       data-testid={`w-remove-${it.id}`}
                       className="h-6 w-6 grid place-items-center rounded-full text-ink2 hover:text-destructive hover:bg-destructive/10"
@@ -237,7 +250,68 @@ export default function WaiterDashboard() {
           ))}
         </Column>
       </div>
+
+      {confirmRemove && (
+        <ConfirmRemoveModal
+          item={confirmRemove.item}
+          orderId={confirmRemove.orderId}
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={confirmAndRemove}
+        />
+      )}
     </StaffShell>
+  );
+}
+
+function ConfirmRemoveModal({ item, orderId, onCancel, onConfirm }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] grid place-items-center p-4"
+      onClick={onCancel}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        data-testid="waiter-confirm-remove"
+        className="bg-surface rounded-2xl w-full max-w-sm p-5 shadow-lift animate-fadeUp"
+      >
+        <div className="flex items-start gap-3">
+          <div className="h-9 w-9 rounded-full bg-destructive/10 grid place-items-center shrink-0">
+            <AlertTriangle size={16} className="text-destructive" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-heading font-semibold text-base">Remove this item?</h3>
+            <p className="text-sm text-ink2 mt-1">
+              <span className="text-ink font-medium">
+                {item.quantity}× {item.menuItemName || item.name}
+              </span>{" "}
+              from order #{orderId}.
+            </p>
+          </div>
+          <button
+            onClick={onCancel}
+            className="text-ink2 hover:text-ink p-1 rounded-full hover:bg-bg2"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="mt-5 flex gap-2 justify-end">
+          <button
+            onClick={onCancel}
+            data-testid="waiter-cancel-remove"
+            className="text-sm rounded-full border border-bg2 hover:bg-bg2/60 px-4 py-1.5 transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            data-testid="waiter-confirm-remove-btn"
+            className="text-sm rounded-full bg-destructive hover:opacity-90 text-white px-4 py-1.5 transition"
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

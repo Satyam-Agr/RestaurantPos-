@@ -168,9 +168,19 @@ export default function OrderSession() {
   const handleAdd = async (menuItemId) => {
     setBusyId(`add-${menuItemId}`);
     try {
-      const updated = await addCartItem(sess.sessionToken, { menuItemId, quantity: 1 });
+      // Client-side dedup: if this menu item is already in the cart,
+      // just bump its quantity rather than creating a new line.
+      const existing = cart?.items?.find((i) => i.menuItemId === menuItemId);
+      let updated;
+      if (existing) {
+        updated = await updateCartItem(sess.sessionToken, existing.id, {
+          quantity: (existing.quantity || 0) + 1,
+        });
+      } else {
+        updated = await addCartItem(sess.sessionToken, { menuItemId, quantity: 1 });
+      }
       setCart(updated);
-      toast.success("Added to cart");
+      toast.success(existing ? "Quantity updated" : "Added to cart");
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -180,15 +190,12 @@ export default function OrderSession() {
 
   const handleQty = async (item, delta) => {
     const newQty = (item.quantity || 0) + delta;
+    // Guardrail — UI should already disable this, but never hit remove via -.
+    if (newQty < 1) return;
     setBusyId(`qty-${item.id}`);
     try {
-      if (newQty <= 0) {
-        const c = await removeCartItem(sess.sessionToken, item.id);
-        setCart(c);
-      } else {
-        const c = await updateCartItem(sess.sessionToken, item.id, { quantity: newQty });
-        setCart(c);
-      }
+      const c = await updateCartItem(sess.sessionToken, item.id, { quantity: newQty });
+      setCart(c);
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -531,9 +538,10 @@ function CartView({ cartRef, cart, onQty, onNotes, onRemove, busyId }) {
             <div className="flex items-center gap-1 bg-bg rounded-full px-1 py-1">
               <button
                 onClick={() => onQty(it, -1)}
-                disabled={busyId === `qty-${it.id}`}
+                disabled={busyId === `qty-${it.id}` || it.quantity <= 1}
+                title={it.quantity <= 1 ? "Use the trash icon to remove" : undefined}
                 data-testid={`decrement-${it.id}`}
-                className="h-8 w-8 grid place-items-center rounded-full hover:bg-bg2 transition"
+                className="h-8 w-8 grid place-items-center rounded-full hover:bg-bg2 transition disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               >
                 <Minus size={14} />
               </button>
@@ -544,7 +552,7 @@ function CartView({ cartRef, cart, onQty, onNotes, onRemove, busyId }) {
                 onClick={() => onQty(it, +1)}
                 disabled={busyId === `qty-${it.id}`}
                 data-testid={`increment-${it.id}`}
-                className="h-8 w-8 grid place-items-center rounded-full hover:bg-bg2 transition"
+                className="h-8 w-8 grid place-items-center rounded-full hover:bg-bg2 transition disabled:opacity-30"
               >
                 <Plus size={14} />
               </button>
