@@ -11,7 +11,7 @@ import { BILL_DEFAULTS, BILL_LIMITS } from "../lib/config";
 import { createStompClient } from "../lib/ws";
 import { toast } from "sonner";
 import {
-  Receipt,
+  Receipt as ReceiptIcon,
   IndianRupee,
   Loader2,
   RefreshCw,
@@ -25,7 +25,10 @@ import {
   AlertTriangle,
   Bell,
   ClipboardList,
+  Printer,
+  Eye,
 } from "lucide-react";
+import Receipt from "../components/Receipt";
 
 export default function CashierDashboard() {
   const [requested, setRequested] = useState([]); // BillRequestSummary[]
@@ -35,6 +38,7 @@ export default function CashierDashboard() {
   const [genFor, setGenFor] = useState(null); // BillRequestSummary
   const [revertFor, setRevertFor] = useState(null); // BillRequestSummary
   const [payFor, setPayFor] = useState(null); // BillResponse
+  const [viewBill, setViewBill] = useState(null); // BillResponse (read-only receipt view)
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -103,7 +107,7 @@ export default function CashierDashboard() {
 
       {requested.length === 0 && pending.length === 0 && (
         <div className="text-center py-20 text-ink2 border border-dashed border-bg2 rounded-3xl">
-          <Receipt size={32} className="mx-auto mb-3 text-brand" />
+          <ReceiptIcon size={32} className="mx-auto mb-3 text-brand" />
           <p className="font-heading text-lg">All clear.</p>
           <p className="text-sm mt-1">
             Bill requests will appear here as customers finish their meals.
@@ -139,7 +143,12 @@ export default function CashierDashboard() {
           empty="No bills awaiting payment."
         >
           {pending.map((b) => (
-            <PaymentCard key={`bill-${b.id}`} bill={b} onPay={() => setPayFor(b)} />
+            <PaymentCard
+              key={`bill-${b.id}`}
+              bill={b}
+              onPay={() => setPayFor(b)}
+              onView={() => setViewBill(b)}
+            />
           ))}
         </Section>
       </div>
@@ -175,6 +184,10 @@ export default function CashierDashboard() {
             refresh();
           }}
         />
+      )}
+
+      {viewBill && (
+        <ViewReceiptModal bill={viewBill} onClose={() => setViewBill(null)} />
       )}
     </StaffShell>
   );
@@ -271,8 +284,10 @@ function RequestCard({ req, onGenerate, onRevert }) {
   );
 }
 
-function PaymentCard({ bill, onPay }) {
-  const tableSessionId = bill.tableSessionId ?? bill.sessionId;
+function PaymentCard({ bill, onPay, onView }) {
+  const items = Array.isArray(bill.items) ? bill.items : [];
+  const itemCount = items.reduce((s, i) => s + (i.quantity || 0), 0);
+
   return (
     <div
       data-testid={`bill-card-${bill.id}`}
@@ -281,24 +296,51 @@ function PaymentCard({ bill, onPay }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">
-            Bill #{bill.id} · Session {tableSessionId}
+            Table {bill.tableNumber ?? "—"} · Bill #{bill.id}
           </div>
           <div className="font-heading text-xl font-semibold">Awaiting payment</div>
+          {bill.generatedAt && (
+            <div className="text-[11px] text-ink2 mt-0.5">
+              Generated {new Date(bill.generatedAt).toLocaleString([], {
+                day: "2-digit",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </div>
+          )}
         </div>
         <div className="text-[10px] uppercase tracking-widest px-2 py-1 rounded-full font-semibold bg-blue-100 text-blue-700">
           UNPAID
         </div>
       </div>
 
+      {/* Compact itemised preview */}
+      {items.length > 0 && (
+        <div className="mb-3 bg-bg rounded-xl p-3 space-y-1 max-h-32 overflow-y-auto">
+          {items.map((it, idx) => (
+            <div
+              key={idx}
+              className="flex items-center justify-between text-xs font-mono"
+            >
+              <span className="text-ink truncate mr-2">
+                {it.quantity}× {it.menuItemName}
+              </span>
+              <span className="text-ink2 shrink-0">
+                ₹{Number(it.lineTotal || (it.quantity || 0) * (it.unitPrice || 0)).toFixed(2)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="space-y-1 text-sm">
         <Row label="Subtotal" value={bill.subtotal} />
-        {bill.tax != null && bill.subtotal ? (
+        {bill.tax != null && (
           <Row
-            label={`Tax (${((bill.tax / bill.subtotal) * 100).toFixed(1)}%)`}
+            label={`Tax${bill.taxRatePercent != null ? ` (${bill.taxRatePercent}%)` : ""}`}
             value={bill.tax}
           />
-        ) : (
-          bill.tax != null && <Row label="Tax" value={bill.tax} />
         )}
         {bill.discount != null && bill.discount > 0 && (
           <Row label="Discount" value={-bill.discount} />
@@ -307,13 +349,23 @@ function PaymentCard({ bill, onPay }) {
         <Row label="Total" value={bill.total} bold />
       </div>
 
-      <button
-        onClick={onPay}
-        data-testid={`pay-bill-${bill.id}`}
-        className="mt-4 w-full rounded-full bg-brand hover:bg-brandHover text-white font-medium py-2.5 transition-all"
-      >
-        Record Payment
-      </button>
+      <div className="mt-4 flex gap-2">
+        <button
+          onClick={onView}
+          data-testid={`view-bill-${bill.id}`}
+          className="flex items-center justify-center gap-1.5 rounded-full border border-bg2 hover:border-brand hover:text-brand text-ink px-3 py-2.5 text-sm font-medium transition"
+        >
+          <Eye size={14} />
+          Receipt
+        </button>
+        <button
+          onClick={onPay}
+          data-testid={`pay-bill-${bill.id}`}
+          className="flex-1 rounded-full bg-brand hover:bg-brandHover text-white font-medium py-2.5 transition-all"
+        >
+          Record Payment {itemCount > 0 && <span className="opacity-70">· {itemCount} items</span>}
+        </button>
+      </div>
     </div>
   );
 }
@@ -623,9 +675,46 @@ function PayBillModal({ bill, onClose, onDone }) {
         data-testid="pay-confirm-btn"
         className="mt-6 w-full flex items-center justify-center gap-2 rounded-full bg-brand hover:bg-brandHover text-white font-medium py-3 transition-all disabled:opacity-50"
       >
-        {busy ? <Loader2 className="animate-spin" size={16} /> : <Receipt size={16} />}
+        {busy ? <Loader2 className="animate-spin" size={16} /> : <ReceiptIcon size={16} />}
         Confirm Payment
       </button>
     </Modal>
+  );
+}
+
+function ViewReceiptModal({ bill, onClose }) {
+  const handlePrint = () => window.print();
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm grid place-items-center p-4 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        data-testid="view-receipt-modal"
+        className="relative max-w-md w-full my-8 animate-fadeUp"
+      >
+        <div className="rounded-3xl overflow-hidden shadow-lift receipt-print">
+          <Receipt bill={bill} />
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-2 print:hidden">
+          <button
+            onClick={onClose}
+            className="text-sm rounded-full border border-white/30 bg-white/10 hover:bg-white/20 text-white px-4 py-2 backdrop-blur transition"
+            data-testid="view-receipt-close"
+          >
+            Close
+          </button>
+          <button
+            onClick={handlePrint}
+            data-testid="view-receipt-print"
+            className="flex items-center gap-1.5 text-sm rounded-full bg-brand hover:bg-brandHover text-white px-4 py-2 shadow-lift transition"
+          >
+            <Printer size={14} />
+            Print
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

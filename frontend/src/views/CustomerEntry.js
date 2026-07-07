@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Phone, UtensilsCrossed, ArrowRight, ShieldAlert, Loader2, CheckCircle2 } from "lucide-react";
-import { loadCustomer, saveCustomer } from "../lib/session";
-import { customerLogin } from "../lib/api";
+import { Phone, UtensilsCrossed, ArrowRight, ShieldAlert, Loader2, CheckCircle2, LogOut } from "lucide-react";
+import { loadCustomer, saveCustomer, clearCustomer, clearSession } from "../lib/session";
+import { customerLogin, customerLogout, getMySession } from "../lib/api";
 import { toast } from "sonner";
 import { debugStore } from "../lib/debugStore";
+import { saveSession } from "../lib/session";
 import TablePicker from "./TablePicker";
 
 export default function CustomerEntry() {
@@ -18,16 +19,50 @@ export default function CustomerEntry() {
   const [err, setErr] = useState("");
   const [autoRedirected, setAutoRedirected] = useState(false);
 
-  // If we already have a valid cached customer token, skip straight to table access
+  // If we already have a valid cached customer token, try to auto-resume any active session first,
+  // otherwise fall through to Create/Join for the scanned table.
   useEffect(() => {
     if (!qr) return; // TablePicker will render below
-    if (cached?.customerToken) {
-      setAutoRedirected(true);
-      const t = setTimeout(() => nav(`/table?qr=${encodeURIComponent(qr)}`), 700);
-      return () => clearTimeout(t);
-    }
+    if (!cached?.customerToken) return;
+
+    let cancelled = false;
+    setAutoRedirected(true);
+
+    (async () => {
+      // Try /api/customers/me/session — if we're already in a table, jump right in.
+      try {
+        const s = await getMySession();
+        if (cancelled) return;
+        if (s && s.sessionToken) {
+          saveSession({ ...s, qrToken: s.qrToken || qr });
+          nav("/order", { replace: true });
+          return;
+        }
+      } catch (e) {
+        // 204/404/other → no active session, proceed to Create/Join
+      }
+      if (cancelled) return;
+      setTimeout(() => nav(`/table?qr=${encodeURIComponent(qr)}`, { replace: true }), 500);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qr]);
+
+  const handleSignOut = async () => {
+    try {
+      await customerLogout();
+    } catch {
+      // even if the endpoint fails, we clear locally
+    }
+    clearCustomer();
+    clearSession();
+    toast.success("Signed out");
+    // stay on the same page so they can log in fresh with a different number
+    window.location.reload();
+  };
 
   // No QR token → show the temporary table picker
   if (!qr) return <TablePicker />;
@@ -107,9 +142,17 @@ export default function CustomerEntry() {
                 <div className="font-heading text-lg font-semibold">
                   Signed in as +91 {cached?.phoneNumber}
                 </div>
-                <div className="text-sm text-ink2 mt-1">Redirecting…</div>
+                <div className="text-sm text-ink2 mt-1">Checking your table…</div>
               </div>
               <Loader2 className="animate-spin text-brand mt-2" size={20} />
+              <button
+                onClick={handleSignOut}
+                data-testid="entry-signout-btn"
+                className="mt-3 text-xs text-ink2 hover:text-destructive flex items-center gap-1 transition"
+              >
+                <LogOut size={12} />
+                Not you? Sign out
+              </button>
             </div>
           ) : (
             <form

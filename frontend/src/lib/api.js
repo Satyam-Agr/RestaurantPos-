@@ -35,8 +35,11 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${staffToken}`;
     logInfo("api", `→ auth: staff token attached (${url})`);
   }
-  // Customer session create/join require Bearer <customerToken>
-  else if (/\/api\/sessions\/(create|join)\//.test(url)) {
+  // Customer session create/join AND customer identity endpoints require Bearer <customerToken>
+  else if (
+    /\/api\/sessions\/(create|join)\//.test(url) ||
+    /\/api\/customers\/(me|logout)/.test(url)
+  ) {
     if (customerToken) {
       config.headers.Authorization = `Bearer ${customerToken}`;
       logInfo("api", `→ auth: customer token attached (${url})`);
@@ -88,6 +91,17 @@ export const getMenu = () => api.get("/api/menu").then((r) => r.data);
 export const customerLogin = (phoneNumber) =>
   api.post("/api/customers/login", { phoneNumber }).then((r) => r.data);
 
+export const customerLogout = () =>
+  api.post("/api/customers/logout").then((r) => r.data);
+
+// Customer's current session (resume flow)
+export const getMySession = () =>
+  api.get("/api/customers/me/session").then((r) => r.data);
+
+// Leave the current table
+export const leaveTable = () =>
+  api.post("/api/customers/me/session/leave").then((r) => r.data);
+
 export const getSessionStatus = (qrToken) =>
   api.get(`/api/sessions/status/${qrToken}`).then((r) => r.data);
 export const createSession = (qrToken) =>
@@ -108,6 +122,8 @@ export const submitCart = (sessionToken) =>
   api.post(`/api/cart/${sessionToken}/submit`).then((r) => r.data);
 
 // Orders
+export const getSessionOrders = (sessionToken) =>
+  api.get(`/api/sessions/${sessionToken}/orders`).then((r) => r.data);
 export const getOrder = (orderId) =>
   api.get(`/api/orders/${orderId}`).then((r) => r.data);
 export const requestBill = (sessionToken) =>

@@ -7,10 +7,13 @@ import {
   updateCartItem,
   removeCartItem,
   submitCart,
+  getSessionOrders,
   getOrder,
   requestBill,
+  leaveTable,
+  customerLogout,
 } from "../lib/api";
-import { loadSession, clearSession, loadOrderIds, saveOrderIds } from "../lib/session";
+import { loadSession, clearSession, loadOrderIds, saveOrderIds, clearCustomer, loadCustomer } from "../lib/session";
 import { createStompClient } from "../lib/ws";
 import { toast } from "sonner";
 import {
@@ -20,6 +23,7 @@ import {
   Send,
   Receipt,
   LogOut,
+  DoorOpen,
   ShoppingBag,
   ClipboardList,
   ChefHat,
@@ -31,6 +35,8 @@ import {
   Copy,
   Users,
   UtensilsCrossed,
+  MoreVertical,
+  AlertTriangle,
 } from "lucide-react";
 
 const STATUS_COLORS = {
@@ -66,6 +72,10 @@ export default function OrderSession() {
   const [submitBusy, setSubmitBusy] = useState(false);
   const [showConfirmBill, setShowConfirmBill] = useState(false);
   const [pinCopied, setPinCopied] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [confirmSignout, setConfirmSignout] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const cartRef = useRef(null);
   const ordersIdsRef = useRef(new Set(loadOrderIds()));
 
@@ -104,20 +114,36 @@ export default function OrderSession() {
   }, [sess?.sessionToken, handleSessionEnded]);
 
   const refreshOrders = useCallback(async () => {
+    if (!sess?.sessionToken) return;
+    // Primary path: single call fetches ALL submitted orders for this session.
+    try {
+      const list = await getSessionOrders(sess.sessionToken);
+      if (Array.isArray(list)) {
+        const sorted = [...list].sort((a, b) => b.id - a.id);
+        setOrders(sorted);
+        const ids = new Set(sorted.map((o) => o.id));
+        ordersIdsRef.current = ids;
+        saveOrderIds([...ids]);
+        return;
+      }
+    } catch (e) {
+      if (handleSessionEnded(e)) return;
+      // Fall through to per-id fallback for older backends
+    }
+    // Fallback: reconcile each known id individually (works even without the new endpoint).
     const ids = ordersIdsRef.current;
     if (ids.size === 0) return;
     try {
       const fresh = await Promise.all([...ids].map((id) => getOrder(id).catch(() => null)));
       const alive = fresh.filter(Boolean).sort((a, b) => b.id - a.id);
       setOrders(alive);
-      // Prune ids that no longer resolve
       const aliveIds = new Set(alive.map((o) => o.id));
       ordersIdsRef.current = aliveIds;
       saveOrderIds([...aliveIds]);
     } catch (e) {
       /* handled in interceptor */
     }
-  }, []);
+  }, [sess?.sessionToken, handleSessionEnded]);
 
   // Initial load: session guard + menu + cart + hydrate orders from persisted ids
   useEffect(() => {
@@ -307,9 +333,36 @@ export default function OrderSession() {
     }
   };
 
-  const handleLeave = () => {
-    clearSession();
-    nav("/");
+  const handleLeaveTable = async () => {
+    setActionBusy(true);
+    try {
+      await leaveTable();
+      toast.success("You've left the table. Your friends can keep ordering.");
+    } catch (e) {
+      // 409 = wasn't in any session; silently proceed to clear local state.
+      if (e.status !== 409) toast.error(e.message);
+    } finally {
+      clearSession();
+      setActionBusy(false);
+      setConfirmLeave(false);
+      nav("/");
+    }
+  };
+
+  const handleSignOut = async () => {
+    setActionBusy(true);
+    try {
+      // Best-effort: leave any active table first so the server-side roster stays clean.
+      await leaveTable().catch(() => {});
+      await customerLogout().catch(() => {});
+    } finally {
+      clearSession();
+      clearCustomer();
+      setActionBusy(false);
+      setConfirmSignout(false);
+      toast.success("Signed out");
+      nav("/");
+    }
   };
 
   const copyPin = () => {
@@ -350,14 +403,59 @@ export default function OrderSession() {
               <Copy size={12} className="text-brand/60 group-hover:text-brand" />
             )}
           </button>
-          <button
-            onClick={handleLeave}
-            data-testid="leave-btn"
-            className="text-ink2 hover:text-destructive p-2 rounded-full hover:bg-destructive/10 transition"
-            title="Leave session"
-          >
-            <LogOut size={16} />
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              data-testid="header-menu-btn"
+              className="text-ink2 hover:text-ink p-2 rounded-full hover:bg-bg2 transition"
+              title="Session menu"
+            >
+              <MoreVertical size={16} />
+            </button>
+            {menuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div
+                  data-testid="header-menu"
+                  className="absolute right-0 mt-2 w-52 z-50 bg-surface border border-bg2 rounded-2xl shadow-lift overflow-hidden animate-fadeUp"
+                >
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setConfirmLeave(true);
+                    }}
+                    data-testid="leave-table-btn"
+                    className="w-full text-left px-4 py-3 hover:bg-bg text-sm flex items-center gap-2.5 border-b border-bg2"
+                  >
+                    <DoorOpen size={14} className="text-ink2" />
+                    <div>
+                      <div className="font-medium text-ink">Leave table</div>
+                      <div className="text-[11px] text-ink2">Others keep ordering</div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setConfirmSignout(true);
+                    }}
+                    data-testid="signout-btn"
+                    className="w-full text-left px-4 py-3 hover:bg-destructive/5 text-sm flex items-center gap-2.5"
+                  >
+                    <LogOut size={14} className="text-destructive" />
+                    <div>
+                      <div className="font-medium text-destructive">Sign out</div>
+                      <div className="text-[11px] text-ink2">
+                        Forget +91 {loadCustomer()?.phoneNumber || ""}
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Tabs */}
@@ -494,6 +592,72 @@ export default function OrderSession() {
               className="flex-1 rounded-full bg-brand hover:bg-brandHover text-white py-2.5 transition"
             >
               Yes, request bill
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Leave table confirmation */}
+      {confirmLeave && (
+        <Modal onClose={() => setConfirmLeave(false)} title="Leave this table?">
+          <div className="flex items-start gap-3 mb-5">
+            <div className="h-9 w-9 rounded-full bg-amber-100 grid place-items-center shrink-0">
+              <DoorOpen size={16} className="text-amber-700" />
+            </div>
+            <p className="text-sm text-ink2 leading-relaxed">
+              You'll be removed from Table {sess.tableNumber}. Your friends can keep ordering on
+              the same shared cart. You can rejoin any table later by scanning its QR.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setConfirmLeave(false)}
+              className="flex-1 rounded-full border border-bg2 py-2.5 hover:bg-bg2/60 transition"
+              data-testid="cancel-leave-btn"
+            >
+              Stay
+            </button>
+            <button
+              onClick={handleLeaveTable}
+              disabled={actionBusy}
+              data-testid="confirm-leave-btn"
+              className="flex-1 flex items-center justify-center gap-2 rounded-full bg-ink hover:bg-black text-white py-2.5 transition disabled:opacity-50"
+            >
+              {actionBusy ? <Loader2 className="animate-spin" size={14} /> : <DoorOpen size={14} />}
+              Leave Table
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Sign out confirmation */}
+      {confirmSignout && (
+        <Modal onClose={() => setConfirmSignout(false)} title="Sign out?">
+          <div className="flex items-start gap-3 mb-5">
+            <div className="h-9 w-9 rounded-full bg-destructive/10 grid place-items-center shrink-0">
+              <AlertTriangle size={16} className="text-destructive" />
+            </div>
+            <p className="text-sm text-ink2 leading-relaxed">
+              This will leave the table and forget your phone number on this device. You'll need
+              to enter it again next time.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setConfirmSignout(false)}
+              className="flex-1 rounded-full border border-bg2 py-2.5 hover:bg-bg2/60 transition"
+              data-testid="cancel-signout-btn"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSignOut}
+              disabled={actionBusy}
+              data-testid="confirm-signout-btn"
+              className="flex-1 flex items-center justify-center gap-2 rounded-full bg-destructive hover:opacity-90 text-white py-2.5 transition disabled:opacity-50"
+            >
+              {actionBusy ? <Loader2 className="animate-spin" size={14} /> : <LogOut size={14} />}
+              Sign out
             </button>
           </div>
         </Modal>
