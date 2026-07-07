@@ -1,0 +1,102 @@
+# Maven
+backend/target/
+backend/.classpath
+backend/.project
+backend/.settings/
+backend/*.jar
+backend/*.war
+backend/.mvn/
+backend/mvnw
+backend/mvnw.cmd
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# Gradle
+backend/.gradle/
+backend/build/
+
+# Compiled classes
+**/*.class
+**/*.jar
+**/*.war
+**/*.ear
+
+# Logs
+*.log
+**/*.log
+logs/
+
+# Node (Frontend)
+frontend/node_modules/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/dist/
+frontend/build/
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# OS specific
+.DS_Store
+Thumbs.db
+.directory
+*.swp
+*.swo
+*~
+
+# IDE temp files
+*.sublime-project
+*.sublime-workspace
+.history/
+
+# Package managers
+backend/.m2/
+*.lock
+
+# Docker
+.docker
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Local environment variables
+.env
+.env.local
+.env.*.local
+
+# Cache
+**/.cache/
+**/.jest/
+
+# Application specific
+*.pid
+*.seed
+*.bak
+
+# Plan and notes (local)
+.claude/
+*.md.local
+plans/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
