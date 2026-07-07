@@ -1,0 +1,105 @@
+{
+  "theme": "LIGHT",
+  "archetype": "1 (Organic & Earthy)",
+  "vibe": "Warm, inviting, efficient, tactile. Bridges the gap between cozy restaurant dining and high-speed staff operations. Prioritizes clarity, real-time collaboration, and an appetizing visual aesthetic.",
+  "colors": {
+    "background_primary": "#FAF8F5",
+    "background_secondary": "#EAE3D9",
+    "surface": "#FFFFFF",
+    "text_primary": "#2C362F",
+    "text_secondary": "#5C6A61",
+    "primary_brand": "#D45D3F",
+    "primary_brand_hover": "#B34A30",
+    "accent": "#E29547",
+    "success": "#4A6B53",
+    "warning": "#E29547",
+    "destructive": "#A63C2E",
+    "glass_background": "bg-white/70 backdrop-blur-xl",
+    "glass_border": "border-white/40"
+  },
+  "typography": {
+    "heading_font": "Outfit, sans-serif",
+    "body_font": "DM Sans, sans-serif",
+    "h1": "text-4xl sm:text-5xl font-semibold tracking-tight text-[#2C362F]",
+    "h2": "text-2xl sm:text-3xl font-medium tracking-tight text-[#2C362F]",
+    "h3": "text-xl sm:text-2xl font-medium text-[#2C362F]",
+    "h4": "text-lg font-medium text-[#2C362F]",
+    "body": "text-base text-[#5C6A61] leading-relaxed",
+    "label": "text-sm uppercase tracking-[0.2em] font-semibold text-[#5C6A61]",
+    "pin_badge": "text-lg font-mono font-bold tracking-widest text-[#D45D3F]"
+  },
+  "spacing_and_layout": {
+    "general": "Generous spacing. Use p-6, p-8 for cards. Grid gap-6 or gap-8.",
+    "dashboard_grid": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4. gap-6. High density for staff, breathable for customers.",
+    "menu_grid": "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3. gap-6. Images must be prominent and enticing.",
+    "borders": "Soft borders, border-[#EAE3D9], rounded-2xl or rounded-3xl for a friendly organic feel.",
+    "shadows": "Ambient diffuse shadows. shadow-sm or shadow-[0_8px_32px_rgba(44,54,47,0.06)]"
+  },
+  "components": {
+    "buttons": "rounded-full or rounded-xl. Primary buttons in Terracotta (#D45D3F). Add hover state with slight lift (-translate-y-1) and shadow-lg.",
+    "cards": "Surface white (#FFFFFF) or glassmorphism (bg-white/70 backdrop-blur-xl) with 1px delicate inner stroke (border-white/40). Avoid boxy sharp edges.",
+    "inputs": "Shadcn UI base. bg-[#FAF8F5] border border-[#EAE3D9] focus:ring-2 focus:ring-[#D45D3F] focus:border-transparent rounded-xl.",
+    "tabs": "Clear order line tabs (Placed, Confirmed, Preparing, Ready, Served). Use active pill shape with primary_brand background.",
+    "toast": "Use Sonner for toasts. Custom styled to match organic theme.",
+    "debug_panel": "Floating global panel (bottom right). Toggleable. Glassmorphism dark (bg-black/80 backdrop-blur-md) with monospace green/red text for errors/WS logs. Must always be accessible.",
+    "customer_pin_badge": "Persistent sticky header element. Floating at the top. Glassmorphism to let the menu scroll underneath."
+  },
+  "motion": {
+    "hover": "transition-all duration-300 ease-out",
+    "list_items": "staggered entrance animations for order queues and menu items",
+    "cart_update": "Subtle scale pop when item added/updated via WS"
+  },
+  "views_and_flows": {
+    "customer_onboarding": "No generic landing. Scan QR -> URL ?qr=<qrToken> -> Phone Number Input -> Create/Join Table (PIN generation/input) -> Menu.",
+    "customer_menu": "Bento-style appetizing food cards. Floating 'Shared Cart' FAB with live item count and real-time collaborative updates. Real-time status tracking.",
+    "staff_login": "Centered auth card. Username/password only. Background: warm cozy restaurant interior image overlay.",
+    "staff_waiter_dash": "Kanban-like or list view: Pending (confirm), Ready to serve. Ability to edit/remove PLACED items.",
+    "staff_kitchen_dash": "Queue of CONFIRMED/PREPARING. Tap to advance status.",
+    "staff_cashier_dash": "Pending bills. Bill generation modal (tax, discount). Payment method selector (Cash/Card/UPI)."
+  },
+  "icons": {
+    "library": "lucide-react",
+    "style": "Friendly, slightly rounded edges, 2px stroke width.",
+    "installation": "yarn add lucide-react"
+  },
+  "media": {
+    "backgrounds": [
+      {
+        "url": "https://images.unsplash.com/photo-1728501650832-57bafbf10a37?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2MjJ8MHwxfHNlYXJjaHw0fHx3YXJtJTIwY296eSUyMHJlc3RhdXJhbnQlMjBpbnRlcmlvcnxlbnwwfHx8fDE3ODM0MTI0MTJ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Warm cozy restaurant interior. Use for Staff Login background with heavy bg-black/50 overlay."
+      }
+    ],
+    "food_items": [
+      {
+        "url": "https://images.unsplash.com/photo-1582392320813-757d869cc952?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwxfHxhcHBldGl6aW5nJTIwZ291cm1ldCUyMGJ1cmdlciUyMHBhc3RhJTIwc2FsYWR8ZW58MHx8fHwxNzgzNDEyNDEyfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Vegetable salad. Use for menu item placeholder."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1592312406332-ceea6e9ee8fb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwzfHxhcHBldGl6aW5nJTIwZ291cm1ldCUyMGJ1cmdlciUyMHBhc3RhJTIwc2FsYWR8ZW58MHx8fHwxNzgzNDEyNDEyfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Pasta on white plate. Use for menu item placeholder."
+      }
+    ],
+    "avatars": [
+      {
+        "url": "https://images.unsplash.com/photo-1581299894007-aaa50297cf16?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODh8MHwxfHNlYXJjaHwyfHxjaGVmJTIwd2FpdGVyJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzgzNDEyNDEyfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Staff avatar."
+      }
+    ]
+  },
+  "testing_attributes": {
+    "rule": "All interactive elements MUST include data-testid attributes.",
+    "examples": [
+      "data-testid='phone-input'",
+      "data-testid='join-table-btn'",
+      "data-testid='add-to-cart-btn'",
+      "data-testid='debug-panel-toggle'",
+      "data-testid='staff-login-btn'"
+    ]
+  },
+  "technical_constraints": [
+    "Use JavaScript (.jsx/.js), DO NOT use TypeScript (.tsx/.ts).",
+    "All components must be functional React components.",
+    "Rely heavily on React Context or Zustand for shared WebSocket states.",
+    "Real-time WebSocket events must map cleanly to UI updates."
+  ]
+}
