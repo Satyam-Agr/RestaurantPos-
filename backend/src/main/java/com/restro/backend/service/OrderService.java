@@ -91,6 +91,10 @@ public class OrderService {
 
     @Transactional
     public OrderResponse updateItemQuantity(Long orderItemId, int quantity, StaffUser waiter) {
+        if (quantity <= 0) {
+            return removeItemBeforeConfirm(orderItemId, waiter);
+        }
+
         OrderItem item = requirePlacedOrder(orderItemId);
         item.setQuantity(quantity);
         orderItemRepository.save(item);

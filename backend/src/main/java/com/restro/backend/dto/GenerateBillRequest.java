@@ -1,9 +1,11 @@
 package com.restro.backend.dto;
 
+import jakarta.validation.constraints.NotNull;
+
 import java.math.BigDecimal;
 
 public record GenerateBillRequest(
-        BigDecimal taxRatePercent,
-        BigDecimal discount
+        @NotNull BigDecimal taxRatePercent,
+        @NotNull BigDecimal discount
 ) {
 }

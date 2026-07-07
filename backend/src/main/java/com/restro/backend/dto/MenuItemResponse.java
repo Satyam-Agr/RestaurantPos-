@@ -7,6 +7,7 @@ public record MenuItemResponse(
         String name,
         String description,
         BigDecimal price,
+        String imageUrl,
         boolean available
 ) {
 }

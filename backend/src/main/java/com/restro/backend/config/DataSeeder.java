@@ -52,12 +52,12 @@ public class DataSeeder implements CommandLineRunner {
         MenuCategory mains = categoryRepository.save(MenuCategory.builder().name("Main Course").sortOrder(2).build());
         MenuCategory beverages = categoryRepository.save(MenuCategory.builder().name("Beverages").sortOrder(3).build());
 
-        menuItemRepository.save(MenuItem.builder().category(starters).name("Paneer Tikka").description("Grilled cottage cheese skewers").price(new BigDecimal("220.00")).available(true).build());
-        menuItemRepository.save(MenuItem.builder().category(starters).name("Veg Spring Rolls").description("Crispy vegetable rolls").price(new BigDecimal("180.00")).available(true).build());
-        menuItemRepository.save(MenuItem.builder().category(mains).name("Butter Chicken").description("Creamy tomato chicken curry").price(new BigDecimal("340.00")).available(true).build());
-        menuItemRepository.save(MenuItem.builder().category(mains).name("Dal Makhani").description("Slow-cooked black lentils").price(new BigDecimal("260.00")).available(true).build());
-        menuItemRepository.save(MenuItem.builder().category(beverages).name("Masala Chai").description("Spiced Indian tea").price(new BigDecimal("60.00")).available(true).build());
-        menuItemRepository.save(MenuItem.builder().category(beverages).name("Fresh Lime Soda").description("Sweet or salted").price(new BigDecimal("80.00")).available(true).build());
+        menuItemRepository.save(MenuItem.builder().category(starters).name("Paneer Tikka").description("Grilled cottage cheese skewers").price(new BigDecimal("220.00")).imageUrl("https://res.cloudinary.com/djw1i7vnc/image/upload/v1783418185/paneer_azoymi.jpg").available(true).build());
+        menuItemRepository.save(MenuItem.builder().category(starters).name("Veg Spring Rolls").description("Crispy vegetable rolls").price(new BigDecimal("180.00")).imageUrl("https://res.cloudinary.com/djw1i7vnc/image/upload/v1783418186/chole_thfufw.jpg").available(true).build());
+        menuItemRepository.save(MenuItem.builder().category(mains).name("Butter Chicken").description("Creamy tomato chicken curry").price(new BigDecimal("340.00")).imageUrl("https://res.cloudinary.com/djw1i7vnc/image/upload/v1783418186/biryani_bna4mp.jpg").available(true).build());
+        menuItemRepository.save(MenuItem.builder().category(mains).name("Dal Makhani").description("Slow-cooked black lentils").price(new BigDecimal("260.00")).imageUrl("https://res.cloudinary.com/djw1i7vnc/image/upload/v1783418185/kofta_xv19ou.jpg").available(true).build());
+        menuItemRepository.save(MenuItem.builder().category(beverages).name("Masala Chai").description("Spiced Indian tea").price(new BigDecimal("60.00")).imageUrl("https://res.cloudinary.com/djw1i7vnc/image/upload/v1783418185/dhosa_j1jaf4.jpg").available(true).build());
+        menuItemRepository.save(MenuItem.builder().category(beverages).name("Fresh Lime Soda").description("Sweet or salted").price(new BigDecimal("80.00")).imageUrl("https://res.cloudinary.com/djw1i7vnc/image/upload/v1783418185/fullplate_huhfwx.jpg").available(true).build());
     }
 
     private void seedStaff() {

@@ -1,5 +1,6 @@
 package com.restro.backend.controller;
 
+import com.restro.backend.dto.BillRequestSummary;
 import com.restro.backend.dto.BillResponse;
 import com.restro.backend.dto.GenerateBillRequest;
 import com.restro.backend.dto.PayBillRequest;
@@ -24,9 +25,19 @@ public class BillController {
         return billService.getPendingBills();
     }
 
+    @GetMapping("/requested")
+    public List<BillRequestSummary> getRequested() {
+        return billService.getBillRequestedSessions();
+    }
+
+    @PatchMapping("/{sessionId}/revert")
+    public void revert(@PathVariable Long sessionId, @AuthenticationPrincipal StaffUserDetails principal) {
+        billService.revertBillRequest(sessionId, principal.staffUser());
+    }
+
     @PostMapping("/{sessionId}/generate")
-    public BillResponse generate(@PathVariable Long sessionId, @RequestBody(required = false) GenerateBillRequest request) {
-        return billService.generateBill(sessionId, request != null ? request : new GenerateBillRequest(null, null));
+    public BillResponse generate(@PathVariable Long sessionId, @Valid @RequestBody GenerateBillRequest request) {
+        return billService.generateBill(sessionId, request);
     }
 
     @PatchMapping("/{billId}/pay")

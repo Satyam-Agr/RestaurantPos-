@@ -39,6 +39,6 @@ public class MenuService {
     }
 
     private MenuItemResponse toItemResponse(MenuItem item) {
-        return new MenuItemResponse(item.getId(), item.getName(), item.getDescription(), item.getPrice(), item.isAvailable());
+        return new MenuItemResponse(item.getId(), item.getName(), item.getDescription(), item.getPrice(), item.getImageUrl(), item.isAvailable());
     }
 }

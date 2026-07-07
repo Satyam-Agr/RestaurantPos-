@@ -6,6 +6,7 @@ import com.restro.backend.dto.SessionStatusResponse;
 import com.restro.backend.exception.ConflictException;
 import com.restro.backend.exception.NotFoundException;
 import com.restro.backend.repository.CustomerOrderRepository;
+import com.restro.backend.repository.CustomerRepository;
 import com.restro.backend.repository.RestaurantTableRepository;
 import com.restro.backend.repository.TableSessionRepository;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ public class SessionService {
     private final RestaurantTableRepository restaurantTableRepository;
     private final TableSessionRepository tableSessionRepository;
     private final CustomerOrderRepository customerOrderRepository;
+    private final CustomerRepository customerRepository;
 
     @Transactional(readOnly = true)
     public SessionStatusResponse getStatus(String qrToken) {
@@ -35,13 +37,16 @@ public class SessionService {
     }
 
     @Transactional
-    public SessionResponse createSession(String qrToken) {
+    public SessionResponse createSession(String qrToken, Long customerId) {
         RestaurantTable table = restaurantTableRepository.findByQrToken(qrToken)
                 .orElseThrow(() -> new NotFoundException("No table found for this QR code"));
 
         if (tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE).isPresent()) {
             throw new ConflictException("An order list already exists for this table. Join it instead.");
         }
+
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new NotFoundException("Customer not found"));
 
         table.setStatus(TableStatus.OCCUPIED);
         restaurantTableRepository.save(table);
@@ -50,6 +55,7 @@ public class SessionService {
                 .table(table)
                 .sessionToken(UUID.randomUUID().toString())
                 .pin(generatePin())
+                .createdByCustomer(customer)
                 .status(SessionStatus.ACTIVE)
                 .openedAt(Instant.now())
                 .build();

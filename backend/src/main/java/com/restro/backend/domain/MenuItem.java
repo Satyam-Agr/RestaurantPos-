@@ -32,6 +32,9 @@ public class MenuItem {
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal price;
 
+    @Column(name = "image_url")
+    private String imageUrl;
+
     @Column(name = "is_available", nullable = false)
     @Builder.Default
     private boolean available = true;

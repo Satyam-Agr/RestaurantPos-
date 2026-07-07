@@ -21,3 +21,4 @@ app:
   jwt:
     secret: ${JWT_SECRET:change-this-to-a-long-random-secret-in-production-min-32-bytes}
     expiration-ms: ${JWT_EXPIRATION_MS:28800000}
+    customer-expiration-ms: ${CUSTOMER_JWT_EXPIRATION_MS:2592000000}

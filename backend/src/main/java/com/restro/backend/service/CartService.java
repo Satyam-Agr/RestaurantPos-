@@ -63,11 +63,15 @@ public class CartService {
         CustomerOrder cart = getCartOrder(session);
         OrderItem item = findCartItem(cart, itemId);
 
-        if (request.quantity() != null) {
-            item.setQuantity(request.quantity());
-        }
-        if (request.notes() != null) {
-            item.setNotes(request.notes());
+        if (request.quantity() != null && request.quantity() <= 0) {
+            cart.getItems().remove(item);
+        } else {
+            if (request.quantity() != null) {
+                item.setQuantity(request.quantity());
+            }
+            if (request.notes() != null) {
+                item.setNotes(request.notes());
+            }
         }
         customerOrderRepository.save(cart);
 

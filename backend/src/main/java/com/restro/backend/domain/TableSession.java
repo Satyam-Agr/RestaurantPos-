@@ -30,6 +30,10 @@ public class TableSession {
     @Column(name = "pin", nullable = false, length = 4)
     private String pin;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "created_by_customer_id", nullable = false)
+    private Customer createdByCustomer;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Builder.Default

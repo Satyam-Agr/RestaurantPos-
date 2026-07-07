@@ -14,4 +14,5 @@ public interface CustomerOrderRepository extends JpaRepository<CustomerOrder, Lo
     List<CustomerOrder> findAllByTableSessionOrderByPlacedAtAsc(TableSession tableSession);
     List<CustomerOrder> findAllByTableSessionAndStatusNotIn(TableSession tableSession, List<OrderStatus> statuses);
     Optional<CustomerOrder> findByTableSessionAndStatus(TableSession tableSession, OrderStatus status);
+    List<CustomerOrder> findAllByTableSessionAndStatus(TableSession tableSession, OrderStatus status);
 }
