@@ -19,7 +19,14 @@ export const loadSession = () => {
 export const clearSession = () => localStorage.removeItem(SESSION_KEY);
 
 // --- Customer identity (30-day cached) ---
-export const saveCustomer = ({ customerToken, customerId, phoneNumber }) => {
+export const saveCustomer = (raw) => {
+  // Accept multiple possible field names from the backend so a naming mismatch
+  // (customerToken / token / accessToken / jwt) doesn't silently fail.
+  const customerToken =
+    raw?.customerToken || raw?.token || raw?.accessToken || raw?.jwt || null;
+  const customerId = raw?.customerId ?? raw?.id ?? null;
+  const phoneNumber = raw?.phoneNumber ?? raw?.phone ?? null;
+
   localStorage.setItem(
     CUSTOMER_KEY,
     JSON.stringify({
@@ -29,6 +36,7 @@ export const saveCustomer = ({ customerToken, customerId, phoneNumber }) => {
       savedAt: Date.now(),
     })
   );
+  return { customerToken, customerId, phoneNumber };
 };
 
 export const loadCustomer = () => {

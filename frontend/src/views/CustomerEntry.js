@@ -4,6 +4,7 @@ import { Phone, UtensilsCrossed, ArrowRight, ShieldAlert, Loader2, CheckCircle2 
 import { loadCustomer, saveCustomer } from "../lib/session";
 import { customerLogin } from "../lib/api";
 import { toast } from "sonner";
+import { debugStore } from "../lib/debugStore";
 import TablePicker from "./TablePicker";
 
 export default function CustomerEntry() {
@@ -41,7 +42,23 @@ export default function CustomerEntry() {
     setBusy(true);
     try {
       const data = await customerLogin(phone.trim());
-      saveCustomer(data);
+      // Log the raw response so we can spot field-name mismatches easily.
+      debugStore.push({
+        type: "info",
+        source: "auth",
+        message: "customerLogin response",
+        detail: data,
+      });
+      const saved = saveCustomer(data);
+      if (!saved.customerToken) {
+        const err =
+          "Backend returned no customer token. Expected field `customerToken` (or token/accessToken/jwt). Got: " +
+          Object.keys(data || {}).join(", ");
+        debugStore.push({ type: "error", source: "auth", message: err, detail: data });
+        setErr(err);
+        toast.error("Login failed — see Debug console for details");
+        return;
+      }
       toast.success("Welcome!");
       nav(`/table?qr=${encodeURIComponent(qr)}`);
     } catch (e) {

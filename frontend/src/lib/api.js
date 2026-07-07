@@ -9,20 +9,43 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-// Attach staff JWT if present
+// Read the freshest customer token from localStorage on every request
+const readCustomerToken = () => {
+  try {
+    const raw = localStorage.getItem("trattoria_customer");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.customerToken || null;
+  } catch {
+    return null;
+  }
+};
+
+// Attach the right token per endpoint
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("staff_token");
-  if (token && config.url && config.url.startsWith("/api/") && !config.url.startsWith("/api/auth")) {
-    // Attach for staff endpoints only (waiter/kitchen/cashier/bills)
-    if (
-      config.url.includes("/waiter/") ||
-      config.url.includes("/kitchen/") ||
-      config.url.includes("/bills")
-    ) {
-      config.headers.Authorization = `Bearer ${token}`;
+  const url = config.url || "";
+  const staffToken = localStorage.getItem("staff_token");
+  const customerToken = readCustomerToken();
+
+  // Staff endpoints
+  if (
+    staffToken &&
+    (url.includes("/waiter/") || url.includes("/kitchen/") || url.includes("/bills"))
+  ) {
+    config.headers.Authorization = `Bearer ${staffToken}`;
+    logInfo("api", `→ auth: staff token attached (${url})`);
+  }
+  // Customer session create/join require Bearer <customerToken>
+  else if (/\/api\/sessions\/(create|join)\//.test(url)) {
+    if (customerToken) {
+      config.headers.Authorization = `Bearer ${customerToken}`;
+      logInfo("api", `→ auth: customer token attached (${url})`);
+    } else {
+      logError("api", `→ auth: NO customer token in localStorage for ${url}`);
     }
   }
-  logInfo("api", `${config.method?.toUpperCase()} ${config.url}`);
+
+  logInfo("api", `${config.method?.toUpperCase()} ${url}`);
   return config;
 });
 
