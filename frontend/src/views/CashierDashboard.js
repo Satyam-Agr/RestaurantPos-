@@ -1,6 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 import StaffShell from "../components/StaffShell";
-import { cashierPending, generateBill, payBill } from "../lib/api";
+import {
+  cashierRequested,
+  cashierPending,
+  revertBillRequest,
+  generateBill,
+  payBill,
+} from "../lib/api";
+import { BILL_DEFAULTS, BILL_LIMITS } from "../lib/config";
 import { createStompClient } from "../lib/ws";
 import { toast } from "sonner";
 import {
@@ -13,19 +20,31 @@ import {
   Smartphone,
   Circle,
   X,
+  Undo2,
+  ArrowRight,
+  AlertTriangle,
+  Bell,
+  ClipboardList,
 } from "lucide-react";
 
 export default function CashierDashboard() {
-  const [bills, setBills] = useState([]);
+  const [requested, setRequested] = useState([]); // BillRequestSummary[]
+  const [pending, setPending] = useState([]); // BillResponse[]
   const [refreshing, setRefreshing] = useState(false);
-  const [genFor, setGenFor] = useState(null); // { sessionId, tableNumber }
-  const [payFor, setPayFor] = useState(null); // bill
+
+  const [genFor, setGenFor] = useState(null); // BillRequestSummary
+  const [revertFor, setRevertFor] = useState(null); // BillRequestSummary
+  const [payFor, setPayFor] = useState(null); // BillResponse
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const b = await cashierPending();
-      setBills(b);
+      const [req, pend] = await Promise.all([
+        cashierRequested().catch(() => []),
+        cashierPending().catch(() => []),
+      ]);
+      setRequested(Array.isArray(req) ? req : []);
+      setPending(Array.isArray(pend) ? pend : []);
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -40,9 +59,15 @@ export default function CashierDashboard() {
         {
           topic: "/topic/cashier",
           handler: (payload) => {
-            if (payload?.type === "BILL_REQUESTED") {
-              toast.info(`Bill requested for table ${payload.tableNumber || ""}`.trim());
-            }
+            const evt = payload?.event;
+            const table = payload?.tableNumber;
+            if (evt === "BILL_REQUESTED") toast.info(`Bill requested — Table ${table || ""}`);
+            if (evt === "BILL_REQUEST_REVERTED")
+              toast.info(`Bill request reverted — Table ${table || ""}`);
+            if (evt === "BILL_GENERATED")
+              toast.success(`Bill generated — Table ${table || ""}`);
+            if (evt === "BILL_PAID")
+              toast.success(`Bill paid — Table ${table || ""}`);
             refresh();
           },
         },
@@ -61,8 +86,10 @@ export default function CashierDashboard() {
 
   return (
     <StaffShell title="Cashier Desk" subtitle="CASHIER" testId="cashier-dashboard">
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-ink2">{bills.length} pending bill(s)</p>
+      <div className="flex items-center justify-between mb-6">
+        <p className="text-ink2">
+          {requested.length} awaiting bill · {pending.length} awaiting payment
+        </p>
         <button
           onClick={refresh}
           disabled={refreshing}
@@ -74,33 +101,66 @@ export default function CashierDashboard() {
         </button>
       </div>
 
-      {bills.length === 0 && (
+      {requested.length === 0 && pending.length === 0 && (
         <div className="text-center py-20 text-ink2 border border-dashed border-bg2 rounded-3xl">
           <Receipt size={32} className="mx-auto mb-3 text-brand" />
-          <p className="font-heading text-lg">No pending bills.</p>
+          <p className="font-heading text-lg">All clear.</p>
           <p className="text-sm mt-1">
-            Bills appear here after customers request the bill from their table.
+            Bill requests will appear here as customers finish their meals.
           </p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {bills.map((b) => (
-          <BillCard
-            key={b.id || `sess-${b.sessionId}`}
-            bill={b}
-            onGenerate={() => setGenFor({ sessionId: b.sessionId, tableNumber: b.tableNumber })}
-            onPay={() => setPayFor(b)}
-          />
-        ))}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Column A — Bill Requests */}
+        <Section
+          title="Bill Requests"
+          Icon={Bell}
+          color="bg-amber-100 text-amber-800"
+          count={requested.length}
+          empty="No pending bill requests."
+        >
+          {requested.map((r) => (
+            <RequestCard
+              key={`req-${r.sessionId ?? r.tableSessionId ?? r.tableNumber}`}
+              req={r}
+              onGenerate={() => setGenFor(r)}
+              onRevert={() => setRevertFor(r)}
+            />
+          ))}
+        </Section>
+
+        {/* Column B — Pending Payments */}
+        <Section
+          title="Awaiting Payment"
+          Icon={ClipboardList}
+          color="bg-blue-100 text-blue-700"
+          count={pending.length}
+          empty="No bills awaiting payment."
+        >
+          {pending.map((b) => (
+            <PaymentCard key={`bill-${b.id}`} bill={b} onPay={() => setPayFor(b)} />
+          ))}
+        </Section>
       </div>
 
       {genFor && (
         <GenerateBillModal
-          info={genFor}
+          req={genFor}
           onClose={() => setGenFor(null)}
           onDone={() => {
             setGenFor(null);
+            refresh();
+          }}
+        />
+      )}
+
+      {revertFor && (
+        <RevertConfirmModal
+          req={revertFor}
+          onClose={() => setRevertFor(null)}
+          onDone={() => {
+            setRevertFor(null);
             refresh();
           }}
         />
@@ -120,59 +180,140 @@ export default function CashierDashboard() {
   );
 }
 
-function BillCard({ bill, onGenerate, onPay }) {
-  const generated = bill.total != null && bill.id;
+// ---------------- Sections & Cards ----------------
+
+function Section({ title, Icon, color, count, empty, children }) {
+  const items = React.Children.toArray(children);
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-3">
+        <div className={`h-7 w-7 grid place-items-center rounded-full ${color}`}>
+          <Icon size={13} />
+        </div>
+        <h2 className="font-heading text-xl font-semibold">{title}</h2>
+        <span className="text-xs text-ink2 font-mono">({count})</span>
+      </div>
+      <div className="space-y-3">
+        {items.length ? (
+          items
+        ) : (
+          <div className="text-center py-10 text-ink2 border border-dashed border-bg2 rounded-2xl">
+            {empty}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RequestCard({ req, onGenerate, onRevert }) {
+  // Defensive: backend may use sessionId or tableSessionId, and may include a preview subtotal
+  const sessionId = req.sessionId ?? req.tableSessionId;
+  const tableNumber = req.tableNumber;
+  const subtotalPreview = req.subtotal ?? req.subtotalPreview ?? null;
+  const itemCount = req.itemCount ?? req.items?.length ?? null;
+
   return (
     <div
-      data-testid={`bill-card-${bill.sessionId}`}
-      className="bg-surface border border-bg2 rounded-2xl p-5 animate-fadeUp"
+      data-testid={`request-card-${sessionId}`}
+      className="bg-surface border border-amber-200 rounded-2xl p-5 animate-fadeUp"
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mb-3">
         <div>
           <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">
-            Table {bill.tableNumber || "—"}
+            Table {tableNumber ?? "—"}
           </div>
-          <div className="font-heading text-xl font-semibold">
-            {generated ? `Bill #${bill.id}` : "Bill requested"}
-          </div>
+          <div className="font-heading text-xl font-semibold">Bill requested</div>
         </div>
-        <div
-          className={`text-[10px] uppercase tracking-widest px-2 py-1 rounded-full font-semibold ${
-            generated ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-700"
-          }`}
-        >
-          {generated ? "AWAITING PAYMENT" : "AWAITING BILL"}
+        <div className="text-[10px] uppercase tracking-widest px-2 py-1 rounded-full font-semibold bg-amber-100 text-amber-800">
+          NEEDS ACTION
         </div>
       </div>
 
-      {generated ? (
-        <>
-          <div className="mt-4 space-y-1 text-sm">
-            <Row label="Subtotal" value={bill.subtotal} />
-            {bill.tax != null && <Row label={`Tax (${bill.taxRatePercent ?? ""}%)`} value={bill.tax} />}
-            {bill.discount != null && bill.discount > 0 && (
-              <Row label="Discount" value={-bill.discount} />
-            )}
-            <div className="h-px bg-bg2 my-2" />
-            <Row label="Total" value={bill.total} bold />
-          </div>
-          <button
-            onClick={onPay}
-            data-testid={`pay-bill-${bill.id}`}
-            className="mt-4 w-full rounded-full bg-brand hover:bg-brandHover text-white font-medium py-2.5 transition-all"
-          >
-            Record Payment
-          </button>
-        </>
-      ) : (
+      {(subtotalPreview != null || itemCount != null) && (
+        <div className="flex gap-4 text-sm mb-4">
+          {itemCount != null && (
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-ink2">Items</div>
+              <div className="font-heading font-semibold">{itemCount}</div>
+            </div>
+          )}
+          {subtotalPreview != null && (
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-ink2">Subtotal</div>
+              <div className="font-heading font-semibold text-brand">
+                ₹{Number(subtotalPreview).toFixed(2)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row gap-2">
+        <button
+          onClick={onRevert}
+          data-testid={`revert-bill-${sessionId}`}
+          className="flex-1 flex items-center justify-center gap-1.5 rounded-full border border-bg2 hover:border-destructive hover:text-destructive hover:bg-destructive/5 text-ink px-4 py-2.5 text-sm font-medium transition"
+        >
+          <Undo2 size={14} />
+          Send Back to Table
+        </button>
         <button
           onClick={onGenerate}
-          data-testid={`generate-bill-${bill.sessionId}`}
-          className="mt-4 w-full rounded-full bg-brand hover:bg-brandHover text-white font-medium py-2.5 transition-all"
+          data-testid={`generate-bill-${sessionId}`}
+          className="flex-1 flex items-center justify-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white px-4 py-2.5 text-sm font-medium transition-all"
         >
-          Generate Bill
+          Proceed to Bill
+          <ArrowRight size={14} />
         </button>
-      )}
+      </div>
+    </div>
+  );
+}
+
+function PaymentCard({ bill, onPay }) {
+  const tableSessionId = bill.tableSessionId ?? bill.sessionId;
+  return (
+    <div
+      data-testid={`bill-card-${bill.id}`}
+      className="bg-surface border border-bg2 rounded-2xl p-5 animate-fadeUp"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">
+            Bill #{bill.id} · Session {tableSessionId}
+          </div>
+          <div className="font-heading text-xl font-semibold">Awaiting payment</div>
+        </div>
+        <div className="text-[10px] uppercase tracking-widest px-2 py-1 rounded-full font-semibold bg-blue-100 text-blue-700">
+          UNPAID
+        </div>
+      </div>
+
+      <div className="space-y-1 text-sm">
+        <Row label="Subtotal" value={bill.subtotal} />
+        {bill.tax != null && bill.subtotal ? (
+          <Row
+            label={`Tax (${((bill.tax / bill.subtotal) * 100).toFixed(1)}%)`}
+            value={bill.tax}
+          />
+        ) : (
+          bill.tax != null && <Row label="Tax" value={bill.tax} />
+        )}
+        {bill.discount != null && bill.discount > 0 && (
+          <Row label="Discount" value={-bill.discount} />
+        )}
+        <div className="h-px bg-bg2 my-2" />
+        <Row label="Total" value={bill.total} bold />
+      </div>
+
+      <button
+        onClick={onPay}
+        data-testid={`pay-bill-${bill.id}`}
+        className="mt-4 w-full rounded-full bg-brand hover:bg-brandHover text-white font-medium py-2.5 transition-all"
+      >
+        Record Payment
+      </button>
     </div>
   );
 }
@@ -188,13 +329,25 @@ function Row({ label, value, bold }) {
   );
 }
 
-function Modal({ title, children, onClose }) {
+// ---------------- Modals ----------------
+
+function Modal({ title, children, onClose, testId }) {
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm grid place-items-center p-4">
-      <div className="bg-surface rounded-3xl max-w-md w-full p-6 shadow-lift animate-fadeUp">
+    <div
+      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm grid place-items-center p-4"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        data-testid={testId}
+        className="bg-surface rounded-3xl max-w-md w-full p-6 shadow-lift animate-fadeUp"
+      >
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-heading text-xl font-semibold">{title}</h3>
-          <button onClick={onClose} className="text-ink2 hover:text-ink p-1 rounded-full hover:bg-bg2">
+          <button
+            onClick={onClose}
+            className="text-ink2 hover:text-ink p-1 rounded-full hover:bg-bg2"
+          >
             <X size={18} />
           </button>
         </div>
@@ -204,21 +357,57 @@ function Modal({ title, children, onClose }) {
   );
 }
 
-function GenerateBillModal({ info, onClose, onDone }) {
-  const [tax, setTax] = useState("5");
-  const [discount, setDiscount] = useState("0");
+function GenerateBillModal({ req, onClose, onDone }) {
+  const sessionId = req.sessionId ?? req.tableSessionId;
+  const subtotalPreview = req.subtotal ?? req.subtotalPreview ?? null;
+
+  const [tax, setTax] = useState(String(BILL_DEFAULTS.taxRatePercent));
+  const [discount, setDiscount] = useState(String(BILL_DEFAULTS.discount));
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const taxNum = Number(tax);
+  const discNum = Number(discount);
+
+  const validate = () => {
+    if (tax === "" || Number.isNaN(taxNum)) return "Tax rate is required.";
+    if (taxNum < BILL_LIMITS.taxRatePercent.min || taxNum > BILL_LIMITS.taxRatePercent.max)
+      return `Tax rate must be between ${BILL_LIMITS.taxRatePercent.min}% and ${BILL_LIMITS.taxRatePercent.max}%.`;
+    if (discount === "" || Number.isNaN(discNum)) return "Discount is required.";
+    if (discNum < BILL_LIMITS.discount.min) return "Discount cannot be negative.";
+    if (subtotalPreview != null && discNum > subtotalPreview)
+      return `Discount cannot exceed subtotal (₹${Number(subtotalPreview).toFixed(2)}).`;
+    return null;
+  };
+
+  // Live preview
+  const preview =
+    subtotalPreview != null
+      ? (() => {
+          const sub = Number(subtotalPreview);
+          const taxAmt = Math.max(0, (sub * (Number.isFinite(taxNum) ? taxNum : 0)) / 100);
+          const disc = Math.max(0, Number.isFinite(discNum) ? discNum : 0);
+          return { sub, taxAmt, disc, total: Math.max(0, sub + taxAmt - disc) };
+        })()
+      : null;
 
   const submit = async () => {
+    const v = validate();
+    if (v) {
+      setErr(v);
+      return;
+    }
+    setErr("");
     setBusy(true);
     try {
-      await generateBill(info.sessionId, {
-        taxRatePercent: Number(tax) || 0,
-        discount: Number(discount) || 0,
+      await generateBill(sessionId, {
+        taxRatePercent: taxNum,
+        discount: discNum,
       });
       toast.success("Bill generated");
       onDone();
     } catch (e) {
+      setErr(e.message);
       toast.error(e.message);
     } finally {
       setBusy(false);
@@ -226,31 +415,80 @@ function GenerateBillModal({ info, onClose, onDone }) {
   };
 
   return (
-    <Modal title={`Generate bill — Table ${info.tableNumber || ""}`} onClose={onClose}>
+    <Modal
+      title={`Generate bill — Table ${req.tableNumber ?? ""}`}
+      onClose={onClose}
+      testId="gen-bill-modal"
+    >
+      <p className="text-xs text-ink2 mb-4">
+        Defaults from restaurant policy (see <code className="font-mono">lib/config.js</code>).
+        Adjust below if needed.
+      </p>
+
       <div className="space-y-3">
         <div>
-          <label className="text-xs uppercase tracking-widest text-ink2 font-semibold">
-            Tax Rate (%)
+          <label className="text-xs uppercase tracking-widest text-ink2 font-semibold flex items-center justify-between">
+            <span>Tax Rate (%)</span>
+            <span className="text-[10px] text-ink2 normal-case tracking-normal">
+              {BILL_LIMITS.taxRatePercent.min}–{BILL_LIMITS.taxRatePercent.max}%
+            </span>
           </label>
           <input
             value={tax}
-            onChange={(e) => setTax(e.target.value.replace(/[^\d.]/g, ""))}
+            onChange={(e) => {
+              setTax(e.target.value.replace(/[^\d.]/g, ""));
+              setErr("");
+            }}
+            inputMode="decimal"
             data-testid="gen-tax-input"
-            className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand"
+            className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand font-mono"
           />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-widest text-ink2 font-semibold">
-            Discount (₹)
+          <label className="text-xs uppercase tracking-widest text-ink2 font-semibold flex items-center justify-between">
+            <span>Discount (₹)</span>
+            <span className="text-[10px] text-ink2 normal-case tracking-normal">
+              min ₹{BILL_LIMITS.discount.min}
+            </span>
           </label>
           <input
             value={discount}
-            onChange={(e) => setDiscount(e.target.value.replace(/[^\d.]/g, ""))}
+            onChange={(e) => {
+              setDiscount(e.target.value.replace(/[^\d.]/g, ""));
+              setErr("");
+            }}
+            inputMode="decimal"
             data-testid="gen-discount-input"
-            className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand"
+            className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand font-mono"
           />
         </div>
       </div>
+
+      {preview && (
+        <div className="mt-5 p-4 rounded-2xl bg-bg border border-bg2">
+          <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold mb-2">
+            Preview
+          </div>
+          <div className="space-y-1 text-sm">
+            <Row label="Subtotal" value={preview.sub} />
+            <Row label={`Tax (${taxNum || 0}%)`} value={preview.taxAmt} />
+            {preview.disc > 0 && <Row label="Discount" value={-preview.disc} />}
+            <div className="h-px bg-bg2 my-1.5" />
+            <Row label="Total" value={preview.total} bold />
+          </div>
+        </div>
+      )}
+
+      {err && (
+        <div
+          data-testid="gen-error"
+          className="mt-4 flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2"
+        >
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>{err}</span>
+        </div>
+      )}
+
       <button
         onClick={submit}
         disabled={busy}
@@ -258,8 +496,70 @@ function GenerateBillModal({ info, onClose, onDone }) {
         className="mt-6 w-full flex items-center justify-center gap-2 rounded-full bg-brand hover:bg-brandHover text-white font-medium py-3 transition-all disabled:opacity-50"
       >
         {busy ? <Loader2 className="animate-spin" size={16} /> : <IndianRupee size={16} />}
-        Generate
+        Generate Bill
       </button>
+    </Modal>
+  );
+}
+
+function RevertConfirmModal({ req, onClose, onDone }) {
+  const sessionId = req.sessionId ?? req.tableSessionId;
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      await revertBillRequest(sessionId);
+      toast.success("Sent back to table");
+      onDone();
+    } catch (e) {
+      setErr(e.message);
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Send back to table?" onClose={onClose} testId="revert-modal">
+      <div className="flex items-start gap-3">
+        <div className="h-9 w-9 rounded-full bg-amber-100 grid place-items-center shrink-0">
+          <Undo2 size={16} className="text-amber-700" />
+        </div>
+        <div className="text-sm text-ink2 leading-relaxed">
+          This will cancel the bill request for{" "}
+          <span className="text-ink font-medium">Table {req.tableNumber ?? ""}</span> and let the
+          diners order more. Their served orders will remain intact.
+        </div>
+      </div>
+
+      {err && (
+        <div className="mt-4 flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>{err}</span>
+        </div>
+      )}
+
+      <div className="mt-6 flex gap-3">
+        <button
+          onClick={onClose}
+          className="flex-1 rounded-full border border-bg2 hover:bg-bg2/60 py-2.5 transition"
+          data-testid="revert-cancel"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={submit}
+          disabled={busy}
+          data-testid="revert-confirm"
+          className="flex-1 flex items-center justify-center gap-2 rounded-full bg-ink hover:bg-black text-white py-2.5 transition-all disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="animate-spin" size={14} /> : <Undo2 size={14} />}
+          Send Back
+        </button>
+      </div>
     </Modal>
   );
 }
@@ -289,7 +589,11 @@ function PayBillModal({ bill, onClose, onDone }) {
   };
 
   return (
-    <Modal title={`Record payment — Bill #${bill.id}`} onClose={onClose}>
+    <Modal
+      title={`Record payment — Bill #${bill.id}`}
+      onClose={onClose}
+      testId="pay-modal"
+    >
       <div className="text-sm text-ink2 mb-1">Total due</div>
       <div className="font-heading text-3xl font-semibold text-brand">
         ₹{Number(bill.total || 0).toFixed(2)}

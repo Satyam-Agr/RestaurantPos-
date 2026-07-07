@@ -137,8 +137,12 @@ export const kitchenSetItemStatus = (itemId, itemStatus) =>
     .then((r) => r.data);
 
 // Cashier
+export const cashierRequested = () =>
+  api.get("/api/bills/requested").then((r) => r.data);
 export const cashierPending = () => api.get("/api/bills/pending").then((r) => r.data);
+export const revertBillRequest = (sessionId) =>
+  api.patch(`/api/bills/${sessionId}/revert`).then((r) => r.data);
 export const generateBill = (sessionId, body) =>
-  api.post(`/api/bills/${sessionId}/generate`, body || {}).then((r) => r.data);
+  api.post(`/api/bills/${sessionId}/generate`, body).then((r) => r.data);
 export const payBill = (billId, paymentMethod) =>
   api.patch(`/api/bills/${billId}/pay`, { paymentMethod }).then((r) => r.data);
