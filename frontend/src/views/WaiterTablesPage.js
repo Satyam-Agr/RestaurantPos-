@@ -5,11 +5,11 @@ import TableGrid from "../components/TableGrid";
 import StatusBadge from "../components/StatusBadge";
 import OrderList from "../components/OrderList";
 import WaiterItemPicker from "../components/WaiterItemPicker";
+import StartTableModal from "../components/StartTableModal";
 import useTableOverview from "../hooks/useTableOverview";
 import {
   waiterTablesList,
   waiterTableDetail,
-  waiterStartTableSession,
   waiterConfirm,
   waiterServeItem,
   waiterRequestBillForTable,
@@ -22,12 +22,20 @@ import {
   Loader2,
   Receipt,
   Plus,
-  Sparkles,
 } from "lucide-react";
 
 export default function WaiterTablesPage() {
   const { tables, loading, refresh } = useTableOverview(waiterTablesList);
-  const [active, setActive] = useState(null); // TableSummaryResponse (from the grid)
+  const [active, setActive] = useState(null); // active session — opens side panel
+  const [startFor, setStartFor] = useState(null); // AVAILABLE table — opens popup
+
+  const handleSelect = (table) => {
+    if (table.overviewStatus === "AVAILABLE") {
+      setStartFor(table);
+    } else {
+      setActive(table);
+    }
+  };
 
   return (
     <StaffShell title="Restaurant Floor" subtitle="WAITER" testId="waiter-tables-page">
@@ -35,14 +43,27 @@ export default function WaiterTablesPage() {
       <TableGrid
         tables={tables}
         role="waiter"
-        activeTableId={active?.tableId}
+        activeTableId={active?.tableId ?? startFor?.tableId}
         loading={loading}
-        onSelect={setActive}
+        onSelect={handleSelect}
       />
       {active && (
         <WaiterTableDetail
           summary={active}
           onClose={() => setActive(null)}
+        />
+      )}
+      {startFor && (
+        <StartTableModal
+          tableId={startFor.tableId}
+          tableNumber={startFor.tableNumber}
+          onClose={() => setStartFor(null)}
+          onStarted={() => {
+            // Table is now active — refresh grid; leave detail closed.
+            // The WS /topic/tables event will flip the tile to AWAITING_ORDER.
+            setStartFor(null);
+            refresh();
+          }}
         />
       )}
     </StaffShell>
@@ -57,14 +78,7 @@ function WaiterTableDetail({ summary, onClose }) {
   const [busy, setBusy] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
 
-  const isAvailable = summary.overviewStatus === "AVAILABLE";
-
   const load = useCallback(async () => {
-    if (isAvailable) {
-      setDetail(null);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     try {
       const d = await waiterTableDetail(summary.tableId);
@@ -75,7 +89,7 @@ function WaiterTableDetail({ summary, onClose }) {
     } finally {
       setLoading(false);
     }
-  }, [summary.tableId, isAvailable, onClose]);
+  }, [summary.tableId, onClose]);
 
   useEffect(() => {
     load();
@@ -86,20 +100,6 @@ function WaiterTableDetail({ summary, onClose }) {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summary.overviewStatus, summary.ordersAwaitingConfirmation, summary.itemsReadyToServe]);
-
-  const startTable = async () => {
-    setBusy("start");
-    try {
-      await waiterStartTableSession(summary.tableId);
-      toast.success(`Table ${summary.tableNumber} opened`);
-      // WS will push AWAITING_ORDER — the effect above will refetch, or we do it now:
-      load();
-    } catch (e) {
-      toast.error(e.status === 409 ? "This table is already active." : e.message);
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const confirmOrder = async (orderId) => {
     setBusy(`c-${orderId}`);
@@ -150,38 +150,7 @@ function WaiterTableDetail({ summary, onClose }) {
         <div className="grid place-items-center py-16">
           <Loader2 className="animate-spin text-brand" size={24} />
         </div>
-      ) : isAvailable || !detail ? (
-        // Empty state — Start Table
-        <div className="text-center py-4">
-          <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">
-            Table
-          </div>
-          <div className="font-heading text-4xl font-bold tracking-tight mb-3">
-            {summary.tableNumber}
-          </div>
-          <div className="inline-flex items-center gap-2 mb-8 rounded-full bg-bg2/60 text-ink2 px-3 py-1 text-[10px] uppercase tracking-widest font-semibold">
-            <Sparkles size={11} />
-            Ready to open
-          </div>
-          <p className="text-ink2 text-sm max-w-xs mx-auto mb-6 leading-relaxed">
-            This table has no active order list. Start one now for a walk-in guest — they
-            can also join later by scanning the QR.
-          </p>
-          <button
-            onClick={startTable}
-            disabled={busy === "start"}
-            data-testid="start-table-btn"
-            className="inline-flex items-center gap-2 rounded-full bg-brand hover:bg-brandHover text-white font-medium px-6 py-3 shadow-lift transition disabled:opacity-50"
-          >
-            {busy === "start" ? (
-              <Loader2 className="animate-spin" size={14} />
-            ) : (
-              <Plus size={14} />
-            )}
-            Start Table
-          </button>
-        </div>
-      ) : (
+      ) : !detail ? null : (
         <>
           <div className="flex items-start justify-between mb-4">
             <div>
