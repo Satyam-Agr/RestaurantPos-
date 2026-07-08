@@ -12,7 +12,6 @@ import com.restro.backend.exception.ConflictException;
 import com.restro.backend.exception.NotFoundException;
 import com.restro.backend.repository.BillRepository;
 import com.restro.backend.repository.CustomerOrderRepository;
-import com.restro.backend.repository.RestaurantTableRepository;
 import com.restro.backend.repository.TableSessionRepository;
 import com.restro.backend.ws.OrderEventBroadcaster;
 import lombok.RequiredArgsConstructor;
@@ -35,10 +34,10 @@ public class BillService {
     private static final List<OrderStatus> EXCLUDED_FROM_BILLING = List.of(OrderStatus.CART, OrderStatus.CANCELLED);
 
     private final TableSessionRepository tableSessionRepository;
-    private final RestaurantTableRepository restaurantTableRepository;
     private final CustomerOrderRepository customerOrderRepository;
     private final BillRepository billRepository;
     private final OrderService orderService;
+    private final SessionService sessionService;
     private final OrderMapper orderMapper;
     private final OrderEventBroadcaster broadcaster;
 
@@ -50,6 +49,10 @@ public class BillService {
         TableSession session = tableSessionRepository.findBySessionToken(sessionToken)
                 .filter(s -> s.getStatus() == SessionStatus.ACTIVE)
                 .orElseThrow(() -> new NotFoundException("Active session not found"));
+
+        if (customerOrderRepository.existsByTableSessionAndStatus(session, OrderStatus.BILL_REQUESTED)) {
+            throw new ConflictException("The bill has already been requested for this table");
+        }
 
         List<CustomerOrder> orders = customerOrderRepository.findAllByTableSessionAndStatusNotIn(session, EXCLUDED_FROM_BILLING);
         boolean anyStillInProgress = orders.stream().anyMatch(o -> o.getStatus() != OrderStatus.SERVED);
@@ -141,7 +144,7 @@ public class BillService {
         bill = billRepository.save(bill);
 
         if (freeTableOnGenerate) {
-            closeSessionAndFreeTable(session);
+            sessionService.closeSessionAndFreeTable(session);
         }
 
         List<CustomerOrder> allSessionOrders = customerOrderRepository.findAllByTableSessionOrderByPlacedAtAsc(session);
@@ -167,22 +170,12 @@ public class BillService {
 
         TableSession session = bill.getTableSession();
         if (session.getStatus() != SessionStatus.CLOSED) {
-            closeSessionAndFreeTable(session);
+            sessionService.closeSessionAndFreeTable(session);
         }
 
         BillResponse response = toResponse(bill);
         broadcaster.notifyCashier(new CashierNotice("BILL_PAID", session.getId(), session.getTable().getTableNumber(), response));
         return response;
-    }
-
-    private void closeSessionAndFreeTable(TableSession session) {
-        session.setStatus(SessionStatus.CLOSED);
-        session.setClosedAt(Instant.now());
-        tableSessionRepository.save(session);
-
-        RestaurantTable table = session.getTable();
-        table.setStatus(TableStatus.AVAILABLE);
-        restaurantTableRepository.save(table);
     }
 
     @Transactional(readOnly = true)

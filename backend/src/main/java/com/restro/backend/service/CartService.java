@@ -35,6 +35,7 @@ public class CartService {
     @Transactional
     public OrderResponse addItem(String sessionToken, OrderItemRequest request) {
         TableSession session = sessionService.getActiveSessionByToken(sessionToken);
+        requireBillNotRequested(session);
         CustomerOrder cart = getCartOrder(session);
 
         MenuItem menuItem = menuItemRepository.findById(request.menuItemId())
@@ -60,6 +61,7 @@ public class CartService {
     @Transactional
     public OrderResponse updateItem(String sessionToken, Long itemId, CartItemUpdateRequest request) {
         TableSession session = sessionService.getActiveSessionByToken(sessionToken);
+        requireBillNotRequested(session);
         CustomerOrder cart = getCartOrder(session);
         OrderItem item = findCartItem(cart, itemId);
 
@@ -81,6 +83,7 @@ public class CartService {
     @Transactional
     public OrderResponse removeItem(String sessionToken, Long itemId) {
         TableSession session = sessionService.getActiveSessionByToken(sessionToken);
+        requireBillNotRequested(session);
         CustomerOrder cart = getCartOrder(session);
         OrderItem item = findCartItem(cart, itemId);
         cart.getItems().remove(item);
@@ -92,6 +95,7 @@ public class CartService {
     @Transactional
     public OrderResponse submit(String sessionToken) {
         TableSession session = sessionService.getActiveSessionByToken(sessionToken);
+        requireBillNotRequested(session);
         CustomerOrder cart = getCartOrder(session);
         if (cart.getItems().isEmpty()) {
             throw new ConflictException("Cannot submit an empty cart");
@@ -119,6 +123,12 @@ public class CartService {
         OrderResponse response = orderMapper.toResponse(cart);
         broadcaster.notifyCart(sessionId, response);
         return response;
+    }
+
+    private void requireBillNotRequested(TableSession session) {
+        if (customerOrderRepository.existsByTableSessionAndStatus(session, OrderStatus.BILL_REQUESTED)) {
+            throw new ConflictException("The bill has already been requested for this table — no further changes are allowed");
+        }
     }
 
     private CustomerOrder getCartOrder(TableSession session) {

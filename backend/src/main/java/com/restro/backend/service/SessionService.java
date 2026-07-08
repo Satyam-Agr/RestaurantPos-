@@ -26,6 +26,10 @@ import java.util.UUID;
 public class SessionService {
 
     private static final SecureRandom PIN_RANDOM = new SecureRandom();
+    private static final List<OrderStatus> ACTIVE_ORDER_STATUSES = List.of(
+            OrderStatus.PLACED, OrderStatus.CONFIRMED, OrderStatus.PREPARING,
+            OrderStatus.READY, OrderStatus.SERVED, OrderStatus.BILL_REQUESTED
+    );
 
     private final RestaurantTableRepository restaurantTableRepository;
     private final TableSessionRepository tableSessionRepository;
@@ -129,8 +133,22 @@ public class SessionService {
         SessionParticipant participant = sessionParticipantRepository
                 .findByCustomerAndTableSession_StatusAndLeftAtIsNull(customer, SessionStatus.ACTIVE)
                 .orElseThrow(() -> new ConflictException("No active session to leave"));
+
+        TableSession session = participant.getTableSession();
+        boolean isCreator = session.getCreatedByCustomer().getId().equals(customerId);
+        boolean hasActiveOrder = customerOrderRepository.existsByTableSessionAndStatusIn(session, ACTIVE_ORDER_STATUSES);
+
+        if (isCreator && hasActiveOrder) {
+            throw new ConflictException("You created this table's order list and it has an order still in progress "
+                    + "— you can't leave until it's served and billed. Ask someone else at the table to take over, or wait until it's done.");
+        }
+
         participant.setLeftAt(Instant.now());
         sessionParticipantRepository.save(participant);
+
+        if (!hasActiveOrder && !sessionParticipantRepository.existsByTableSessionAndLeftAtIsNull(session)) {
+            closeSessionAndFreeTable(session);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -151,6 +169,16 @@ public class SessionService {
             throw new NotFoundException("Session is no longer active");
         }
         return session;
+    }
+
+    void closeSessionAndFreeTable(TableSession session) {
+        session.setStatus(SessionStatus.CLOSED);
+        session.setClosedAt(Instant.now());
+        tableSessionRepository.save(session);
+
+        RestaurantTable table = session.getTable();
+        table.setStatus(TableStatus.AVAILABLE);
+        restaurantTableRepository.save(table);
     }
 
     private void requireNoOtherActiveSession(Customer customer) {
