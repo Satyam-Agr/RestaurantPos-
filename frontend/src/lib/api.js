@@ -30,7 +30,10 @@ api.interceptors.request.use((config) => {
   // Staff endpoints
   if (
     staffToken &&
-    (url.includes("/waiter/") || url.includes("/kitchen/") || url.includes("/bills"))
+    (url.includes("/waiter/") ||
+      url.includes("/kitchen/") ||
+      url.includes("/cashier/") ||
+      url.includes("/bills"))
   ) {
     config.headers.Authorization = `Bearer ${staffToken}`;
     logInfo("api", `→ auth: staff token attached (${url})`);
