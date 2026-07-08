@@ -3,10 +3,13 @@ import StaffShell from "../components/StaffShell";
 import StaffTabs from "../components/StaffTabs";
 import TableGrid from "../components/TableGrid";
 import StatusBadge from "../components/StatusBadge";
+import OrderList from "../components/OrderList";
+import WaiterItemPicker from "../components/WaiterItemPicker";
 import useTableOverview from "../hooks/useTableOverview";
 import {
   waiterTablesList,
   waiterTableDetail,
+  waiterStartTableSession,
   waiterConfirm,
   waiterServeItem,
   waiterRequestBillForTable,
@@ -17,19 +20,10 @@ import {
   Users,
   KeyRound,
   Loader2,
-  CheckCircle2,
-  Bell,
   Receipt,
+  Plus,
+  Sparkles,
 } from "lucide-react";
-
-const ITEM_STATUS_TONE = {
-  PENDING: "bg-slate-100 text-slate-700",
-  CONFIRMED: "bg-blue-100 text-blue-700",
-  PREPARING: "bg-amber-100 text-amber-800",
-  READY: "bg-emerald-100 text-emerald-800",
-  SERVED: "bg-successc/15 text-successc",
-  CANCELLED: "bg-red-100 text-red-700",
-};
 
 export default function WaiterTablesPage() {
   const { tables, loading, refresh } = useTableOverview(waiterTablesList);
@@ -61,8 +55,16 @@ function WaiterTableDetail({ summary, onClose }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(null);
+  const [showPicker, setShowPicker] = useState(false);
+
+  const isAvailable = summary.overviewStatus === "AVAILABLE";
 
   const load = useCallback(async () => {
+    if (isAvailable) {
+      setDetail(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const d = await waiterTableDetail(summary.tableId);
@@ -73,7 +75,7 @@ function WaiterTableDetail({ summary, onClose }) {
     } finally {
       setLoading(false);
     }
-  }, [summary.tableId, onClose]);
+  }, [summary.tableId, isAvailable, onClose]);
 
   useEffect(() => {
     load();
@@ -84,6 +86,20 @@ function WaiterTableDetail({ summary, onClose }) {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summary.overviewStatus, summary.ordersAwaitingConfirmation, summary.itemsReadyToServe]);
+
+  const startTable = async () => {
+    setBusy("start");
+    try {
+      await waiterStartTableSession(summary.tableId);
+      toast.success(`Table ${summary.tableNumber} opened`);
+      // WS will push AWAITING_ORDER — the effect above will refetch, or we do it now:
+      load();
+    } catch (e) {
+      toast.error(e.status === 409 ? "This table is already active." : e.message);
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const confirmOrder = async (orderId) => {
     setBusy(`c-${orderId}`);
@@ -125,12 +141,45 @@ function WaiterTableDetail({ summary, onClose }) {
   };
 
   const canRequestBill = detail?.overviewStatus === "SERVED_AWAITING_BILL";
+  const canAddOrder =
+    detail && detail.sessionId && detail.overviewStatus !== "BILL_REQUESTED";
 
   return (
     <DetailPanel onClose={onClose} testId="waiter-table-detail">
-      {loading || !detail ? (
+      {loading ? (
         <div className="grid place-items-center py-16">
           <Loader2 className="animate-spin text-brand" size={24} />
+        </div>
+      ) : isAvailable || !detail ? (
+        // Empty state — Start Table
+        <div className="text-center py-4">
+          <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">
+            Table
+          </div>
+          <div className="font-heading text-4xl font-bold tracking-tight mb-3">
+            {summary.tableNumber}
+          </div>
+          <div className="inline-flex items-center gap-2 mb-8 rounded-full bg-bg2/60 text-ink2 px-3 py-1 text-[10px] uppercase tracking-widest font-semibold">
+            <Sparkles size={11} />
+            Ready to open
+          </div>
+          <p className="text-ink2 text-sm max-w-xs mx-auto mb-6 leading-relaxed">
+            This table has no active order list. Start one now for a walk-in guest — they
+            can also join later by scanning the QR.
+          </p>
+          <button
+            onClick={startTable}
+            disabled={busy === "start"}
+            data-testid="start-table-btn"
+            className="inline-flex items-center gap-2 rounded-full bg-brand hover:bg-brandHover text-white font-medium px-6 py-3 shadow-lift transition disabled:opacity-50"
+          >
+            {busy === "start" ? (
+              <Loader2 className="animate-spin" size={14} />
+            ) : (
+              <Plus size={14} />
+            )}
+            Start Table
+          </button>
         </div>
       ) : (
         <>
@@ -175,98 +224,25 @@ function WaiterTableDetail({ summary, onClose }) {
             )}
           </div>
 
+          {/* Add Order button */}
+          {canAddOrder && (
+            <button
+              onClick={() => setShowPicker(true)}
+              data-testid="add-order-btn"
+              className="mb-4 w-full flex items-center justify-center gap-2 rounded-full border-2 border-dashed border-brand/50 text-brand hover:bg-brand/5 font-medium py-2.5 transition"
+            >
+              <Plus size={14} />
+              Add Order
+            </button>
+          )}
+
           {/* Orders */}
-          <div className="space-y-3">
-            {(!detail.orders || detail.orders.length === 0) && (
-              <div className="text-center text-ink2 py-6 border border-dashed border-bg2 rounded-2xl">
-                No submitted orders yet.
-              </div>
-            )}
-            {detail.orders?.map((o) => (
-              <div key={o.id} className="bg-bg rounded-2xl p-3 border border-bg2">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">
-                    Order #{o.id}
-                  </div>
-                  <span
-                    className={`text-[9px] uppercase tracking-widest font-semibold px-2 py-0.5 rounded-full ${
-                      o.status === "PLACED"
-                        ? "bg-blue-100 text-blue-700"
-                        : o.status === "SERVED"
-                        ? "bg-successc/15 text-successc"
-                        : "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {o.status}
-                  </span>
-                </div>
-                <div className="space-y-1.5">
-                  {o.items?.map((it) => (
-                    <div
-                      key={it.id}
-                      className={`flex items-center justify-between text-sm ${
-                        it.itemStatus === "CANCELLED" ? "opacity-60" : ""
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className={
-                            it.itemStatus === "CANCELLED" ? "line-through" : "text-ink"
-                          }
-                        >
-                          {it.quantity}× {it.menuItemName}
-                        </span>
-                        {it.notes && (
-                          <span className="text-xs text-ink2 italic truncate">
-                            — {it.notes}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span
-                          className={`text-[9px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${
-                            ITEM_STATUS_TONE[it.itemStatus] || "bg-slate-100 text-slate-700"
-                          }`}
-                        >
-                          {it.itemStatus}
-                        </span>
-                        {it.itemStatus === "READY" && (
-                          <button
-                            onClick={() => serveItem(it.id)}
-                            disabled={busy === `s-${it.id}`}
-                            data-testid={`serve-item-${it.id}`}
-                            className="text-[10px] bg-successc hover:opacity-90 text-white rounded-full px-2 py-0.5 flex items-center gap-1 disabled:opacity-50"
-                          >
-                            {busy === `s-${it.id}` ? (
-                              <Loader2 size={9} className="animate-spin" />
-                            ) : (
-                              <Bell size={9} />
-                            )}
-                            Serve
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {o.status === "PLACED" && (
-                  <button
-                    onClick={() => confirmOrder(o.id)}
-                    disabled={busy === `c-${o.id}`}
-                    data-testid={`confirm-order-${o.id}`}
-                    className="mt-3 w-full flex items-center justify-center gap-2 rounded-full bg-brand hover:bg-brandHover text-white text-sm font-medium py-2 transition disabled:opacity-50"
-                  >
-                    {busy === `c-${o.id}` ? (
-                      <Loader2 className="animate-spin" size={12} />
-                    ) : (
-                      <CheckCircle2 size={12} />
-                    )}
-                    Confirm Order
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
+          <OrderList
+            orders={detail.orders}
+            onConfirmOrder={confirmOrder}
+            onServeItem={serveItem}
+            busy={busy}
+          />
 
           {/* Request Bill — only shown when everything's served */}
           {canRequestBill && !detail.billRequested && (
@@ -289,6 +265,18 @@ function WaiterTableDetail({ summary, onClose }) {
             <div className="mt-5 text-center rounded-2xl border border-yellow-300 bg-yellow-50 text-yellow-800 py-3 text-sm font-medium">
               Bill already requested — waiting for cashier.
             </div>
+          )}
+
+          {showPicker && (
+            <WaiterItemPicker
+              tableId={detail.tableId}
+              tableNumber={detail.tableNumber}
+              onClose={() => setShowPicker(false)}
+              onPlaced={() => {
+                setShowPicker(false);
+                load();
+              }}
+            />
           )}
         </>
       )}

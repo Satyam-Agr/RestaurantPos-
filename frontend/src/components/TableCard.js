@@ -10,15 +10,19 @@ export default function TableCard({ table, role = "waiter", onClick, active }) {
   const status = table.overviewStatus || "AVAILABLE";
   const cfg = OVERVIEW_STATUS[status] || OVERVIEW_STATUS.AVAILABLE;
   const isAvailable = status === "AVAILABLE";
+  // Waiter can open AVAILABLE tables (to start a walk-in session).
+  const clickable = !isAvailable || role === "waiter";
 
   return (
     <button
       onClick={onClick}
-      disabled={isAvailable}
+      disabled={!clickable}
       data-testid={`table-card-${table.tableId}`}
       className={`group relative text-left rounded-2xl border transition-all p-4 min-h-[130px] ${
         isAvailable
-          ? "bg-bg/40 border-bg2 opacity-60 cursor-not-allowed"
+          ? clickable
+            ? "bg-bg/40 border-dashed border-bg2 hover:border-brand hover:bg-brand/5 opacity-90 cursor-pointer"
+            : "bg-bg/40 border-bg2 opacity-60 cursor-not-allowed"
           : "bg-surface border-bg2 hover:-translate-y-0.5 hover:shadow-lift cursor-pointer"
       } ${
         active
@@ -86,7 +90,13 @@ export default function TableCard({ table, role = "waiter", onClick, active }) {
       )}
 
       {isAvailable && (
-        <div className="mt-6 text-xs text-ink2/70 italic">No active session</div>
+        <div className="mt-6 text-xs italic">
+          {role === "waiter" ? (
+            <span className="text-brand font-medium">Tap to start table</span>
+          ) : (
+            <span className="text-ink2/70">No active session</span>
+          )}
+        </div>
       )}
     </button>
   );

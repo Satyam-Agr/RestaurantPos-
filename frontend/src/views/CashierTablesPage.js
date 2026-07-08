@@ -3,6 +3,7 @@ import StaffShell from "../components/StaffShell";
 import StaffTabs from "../components/StaffTabs";
 import TableGrid from "../components/TableGrid";
 import StatusBadge from "../components/StatusBadge";
+import OrderList from "../components/OrderList";
 import GenerateBillModal from "../components/GenerateBillModal";
 import { DetailPanel } from "./WaiterTablesPage";
 import useTableOverview from "../hooks/useTableOverview";
@@ -130,6 +131,16 @@ function CashierTableDetail({ summary, onClose }) {
           {detail.billRequested && (
             <div className="mt-5 text-center rounded-2xl border border-yellow-300 bg-yellow-50 text-yellow-800 py-3 text-sm font-medium">
               Customer has requested the bill.
+            </div>
+          )}
+
+          {/* Itemized orders — same layout as waiter, but read-only (no confirm/serve). */}
+          {detail.orders && detail.orders.length > 0 && (
+            <div className="mt-5">
+              <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold mb-2">
+                Orders
+              </div>
+              <OrderList orders={detail.orders} />
             </div>
           )}
 

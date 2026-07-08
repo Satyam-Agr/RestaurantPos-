@@ -137,6 +137,10 @@ export const login = (username, password) =>
 export const waiterTablesList = () => api.get("/api/waiter/tables").then((r) => r.data);
 export const waiterTableDetail = (tableId) =>
   api.get(`/api/waiter/tables/${tableId}`).then((r) => r.data);
+export const waiterStartTableSession = (tableId) =>
+  api.post(`/api/waiter/tables/${tableId}/session`).then((r) => r.data);
+export const waiterPlaceOrder = (tableId, items) =>
+  api.post(`/api/waiter/tables/${tableId}/orders`, { items }).then((r) => r.data);
 export const waiterRequestBillForTable = (tableId) =>
   api.post(`/api/waiter/tables/${tableId}/request-bill`).then((r) => r.data);
 export const waiterPending = () => api.get("/api/waiter/orders/pending").then((r) => r.data);
