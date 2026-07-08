@@ -76,6 +76,9 @@ export default function OrderSession() {
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [confirmSignout, setConfirmSignout] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  // Optimistic lock: flips to `true` the instant we successfully request a bill,
+  // and back to `false` as soon as the server state shows no BILL_REQUESTED order.
+  const [justRequestedBill, setJustRequestedBill] = useState(false);
   const cartRef = useRef(null);
   const ordersIdsRef = useRef(new Set(loadOrderIds()));
 
@@ -227,8 +230,21 @@ export default function OrderSession() {
     };
   }, [sess?.sessionId, refreshCart, refreshOrders]);
 
+  // Combined: any server-confirmed BILL_REQUESTED order OR our optimistic just-clicked flag.
+  const serverBillRequested = orders.some((o) => o.status === "BILL_REQUESTED");
+  const billRequested = serverBillRequested || justRequestedBill;
+
+  // Once the server confirms no BILL_REQUESTED order exists (i.e., after revert),
+  // clear the optimistic flag so the UI re-enables cleanly.
+  useEffect(() => {
+    if (!serverBillRequested && justRequestedBill) {
+      // Only clear if we have at least one order visible (i.e., a real reconciliation happened,
+      // not the empty-array we saw between the click and the first fetch).
+      if (orders.length > 0) setJustRequestedBill(false);
+    }
+  }, [serverBillRequested, justRequestedBill, orders.length]);
+
   // When bill is requested, force any user viewing the cart tab back to menu.
-  const billRequested = orders.some((o) => o.status === "BILL_REQUESTED");
   useEffect(() => {
     if (billRequested) {
       setActiveTab((tab) => (tab === "cart" ? "menu" : tab));
@@ -325,6 +341,11 @@ export default function OrderSession() {
   const handleRequestBill = async () => {
     try {
       await requestBill(sess.sessionToken);
+      // 1) Instantly lock the UI so no more actions slip through the async gap.
+      setJustRequestedBill(true);
+      // 2) Force-refresh orders from REST so the state is genuinely in sync,
+      //    not just optimistically flipped.
+      refreshOrders();
       toast.success("Bill requested. The cashier will bring it shortly.");
       setShowConfirmBill(false);
     } catch (e) {
