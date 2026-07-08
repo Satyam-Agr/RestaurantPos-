@@ -1,20 +1,18 @@
 import React, { useCallback, useEffect, useState } from "react";
 import StaffShell from "../components/StaffShell";
+import StaffTabs from "../components/StaffTabs";
+import GenerateBillModal from "../components/GenerateBillModal";
 import {
   cashierRequested,
   cashierPending,
   revertBillRequest,
-  generateBill,
   payBill,
 } from "../lib/api";
-import { BILL_DEFAULTS, BILL_LIMITS } from "../lib/config";
 import { createStompClient } from "../lib/ws";
 import { toast } from "sonner";
 import {
   Receipt as ReceiptIcon,
-  IndianRupee,
   Loader2,
-  RefreshCw,
   Wallet,
   CreditCard,
   Smartphone,
@@ -90,20 +88,10 @@ export default function CashierDashboard() {
 
   return (
     <StaffShell title="Cashier Desk" subtitle="CASHIER" testId="cashier-dashboard">
-      <div className="flex items-center justify-between mb-6">
-        <p className="text-ink2">
-          {requested.length} awaiting bill · {pending.length} awaiting payment
-        </p>
-        <button
-          onClick={refresh}
-          disabled={refreshing}
-          data-testid="cashier-refresh-btn"
-          className="text-sm text-ink2 hover:text-brand flex items-center gap-1.5 transition"
-        >
-          <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
-          Refresh
-        </button>
-      </div>
+      <StaffTabs current="queue" role="cashier" refreshing={refreshing} onRefresh={refresh} />
+      <p className="text-ink2 mb-4">
+        {requested.length} awaiting bill · {pending.length} awaiting payment
+      </p>
 
       {requested.length === 0 && pending.length === 0 && (
         <div className="text-center py-20 text-ink2 border border-dashed border-bg2 rounded-3xl">
@@ -155,7 +143,9 @@ export default function CashierDashboard() {
 
       {genFor && (
         <GenerateBillModal
-          req={genFor}
+          sessionId={genFor.sessionId ?? genFor.tableSessionId}
+          tableNumber={genFor.tableNumber}
+          subtotalPreview={genFor.subtotal ?? genFor.subtotalPreview}
           onClose={() => setGenFor(null)}
           onDone={() => {
             setGenFor(null);
@@ -409,150 +399,6 @@ function Modal({ title, children, onClose, testId }) {
   );
 }
 
-function GenerateBillModal({ req, onClose, onDone }) {
-  const sessionId = req.sessionId ?? req.tableSessionId;
-  const subtotalPreview = req.subtotal ?? req.subtotalPreview ?? null;
-
-  const [tax, setTax] = useState(String(BILL_DEFAULTS.taxRatePercent));
-  const [discount, setDiscount] = useState(String(BILL_DEFAULTS.discount));
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  const taxNum = Number(tax);
-  const discNum = Number(discount);
-
-  const validate = () => {
-    if (tax === "" || Number.isNaN(taxNum)) return "Tax rate is required.";
-    if (taxNum < BILL_LIMITS.taxRatePercent.min || taxNum > BILL_LIMITS.taxRatePercent.max)
-      return `Tax rate must be between ${BILL_LIMITS.taxRatePercent.min}% and ${BILL_LIMITS.taxRatePercent.max}%.`;
-    if (discount === "" || Number.isNaN(discNum)) return "Discount is required.";
-    if (discNum < BILL_LIMITS.discount.min) return "Discount cannot be negative.";
-    if (subtotalPreview != null && discNum > subtotalPreview)
-      return `Discount cannot exceed subtotal (₹${Number(subtotalPreview).toFixed(2)}).`;
-    return null;
-  };
-
-  // Live preview
-  const preview =
-    subtotalPreview != null
-      ? (() => {
-          const sub = Number(subtotalPreview);
-          const taxAmt = Math.max(0, (sub * (Number.isFinite(taxNum) ? taxNum : 0)) / 100);
-          const disc = Math.max(0, Number.isFinite(discNum) ? discNum : 0);
-          return { sub, taxAmt, disc, total: Math.max(0, sub + taxAmt - disc) };
-        })()
-      : null;
-
-  const submit = async () => {
-    const v = validate();
-    if (v) {
-      setErr(v);
-      return;
-    }
-    setErr("");
-    setBusy(true);
-    try {
-      await generateBill(sessionId, {
-        taxRatePercent: taxNum,
-        discount: discNum,
-      });
-      toast.success("Bill generated");
-      onDone();
-    } catch (e) {
-      setErr(e.message);
-      toast.error(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal
-      title={`Generate bill — Table ${req.tableNumber ?? ""}`}
-      onClose={onClose}
-      testId="gen-bill-modal"
-    >
-      <p className="text-xs text-ink2 mb-4">
-        Defaults from restaurant policy (see <code className="font-mono">lib/config.js</code>).
-        Adjust below if needed.
-      </p>
-
-      <div className="space-y-3">
-        <div>
-          <label className="text-xs uppercase tracking-widest text-ink2 font-semibold flex items-center justify-between">
-            <span>Tax Rate (%)</span>
-            <span className="text-[10px] text-ink2 normal-case tracking-normal">
-              {BILL_LIMITS.taxRatePercent.min}–{BILL_LIMITS.taxRatePercent.max}%
-            </span>
-          </label>
-          <input
-            value={tax}
-            onChange={(e) => {
-              setTax(e.target.value.replace(/[^\d.]/g, ""));
-              setErr("");
-            }}
-            inputMode="decimal"
-            data-testid="gen-tax-input"
-            className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand font-mono"
-          />
-        </div>
-        <div>
-          <label className="text-xs uppercase tracking-widest text-ink2 font-semibold flex items-center justify-between">
-            <span>Discount (₹)</span>
-            <span className="text-[10px] text-ink2 normal-case tracking-normal">
-              min ₹{BILL_LIMITS.discount.min}
-            </span>
-          </label>
-          <input
-            value={discount}
-            onChange={(e) => {
-              setDiscount(e.target.value.replace(/[^\d.]/g, ""));
-              setErr("");
-            }}
-            inputMode="decimal"
-            data-testid="gen-discount-input"
-            className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand font-mono"
-          />
-        </div>
-      </div>
-
-      {preview && (
-        <div className="mt-5 p-4 rounded-2xl bg-bg border border-bg2">
-          <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold mb-2">
-            Preview
-          </div>
-          <div className="space-y-1 text-sm">
-            <Row label="Subtotal" value={preview.sub} />
-            <Row label={`Tax (${taxNum || 0}%)`} value={preview.taxAmt} />
-            {preview.disc > 0 && <Row label="Discount" value={-preview.disc} />}
-            <div className="h-px bg-bg2 my-1.5" />
-            <Row label="Total" value={preview.total} bold />
-          </div>
-        </div>
-      )}
-
-      {err && (
-        <div
-          data-testid="gen-error"
-          className="mt-4 flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2"
-        >
-          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-          <span>{err}</span>
-        </div>
-      )}
-
-      <button
-        onClick={submit}
-        disabled={busy}
-        data-testid="gen-confirm-btn"
-        className="mt-6 w-full flex items-center justify-center gap-2 rounded-full bg-brand hover:bg-brandHover text-white font-medium py-3 transition-all disabled:opacity-50"
-      >
-        {busy ? <Loader2 className="animate-spin" size={16} /> : <IndianRupee size={16} />}
-        Generate Bill
-      </button>
-    </Modal>
-  );
-}
 
 function RevertConfirmModal({ req, onClose, onDone }) {
   const sessionId = req.sessionId ?? req.tableSessionId;

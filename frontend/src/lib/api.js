@@ -134,6 +134,11 @@ export const login = (username, password) =>
   api.post("/api/auth/login", { username, password }).then((r) => r.data);
 
 // Waiter
+export const waiterTablesList = () => api.get("/api/waiter/tables").then((r) => r.data);
+export const waiterTableDetail = (tableId) =>
+  api.get(`/api/waiter/tables/${tableId}`).then((r) => r.data);
+export const waiterRequestBillForTable = (tableId) =>
+  api.post(`/api/waiter/tables/${tableId}/request-bill`).then((r) => r.data);
 export const waiterPending = () => api.get("/api/waiter/orders/pending").then((r) => r.data);
 export const waiterReady = () => api.get("/api/waiter/orders/ready-to-serve").then((r) => r.data);
 export const waiterConfirm = (orderId) =>
@@ -153,6 +158,9 @@ export const kitchenSetItemStatus = (itemId, itemStatus) =>
     .then((r) => r.data);
 
 // Cashier
+export const cashierTablesList = () => api.get("/api/cashier/tables").then((r) => r.data);
+export const cashierTableDetail = (tableId) =>
+  api.get(`/api/cashier/tables/${tableId}`).then((r) => r.data);
 export const cashierRequested = () =>
   api.get("/api/bills/requested").then((r) => r.data);
 export const cashierPending = () => api.get("/api/bills/pending").then((r) => r.data);

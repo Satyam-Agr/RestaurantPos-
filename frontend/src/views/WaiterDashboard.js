@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import StaffShell from "../components/StaffShell";
+import StaffTabs from "../components/StaffTabs";
 import {
   waiterPending,
   waiterReady,
@@ -18,7 +19,6 @@ import {
   Trash2,
   Plus,
   Minus,
-  RefreshCw,
   AlertTriangle,
   X,
 } from "lucide-react";
@@ -128,19 +128,9 @@ export default function WaiterDashboard() {
 
   return (
     <StaffShell title="Waiter Dashboard" subtitle="WAITER" testId="waiter-dashboard">
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-ink2">
-          {pending.length} pending · {ready.length} ready to serve
-        </p>
-        <button
-          onClick={refresh}
-          disabled={refreshing}
-          data-testid="waiter-refresh-btn"
-          className="text-sm text-ink2 hover:text-brand flex items-center gap-1.5 transition"
-        >
-          <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
-          Refresh
-        </button>
+      <StaffTabs current="queue" role="waiter" refreshing={refreshing} onRefresh={refresh} />
+      <div className="text-ink2 mb-4">
+        {pending.length} pending · {ready.length} ready to serve
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
