@@ -1,10 +1,18 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, UtensilsCrossed, UserCircle2 } from "lucide-react";
+import { LogOut, UtensilsCrossed, UserCircle2, ArrowLeft } from "lucide-react";
 
-export default function StaffShell({ title, subtitle, children, testId }) {
+const ROLE_HOME = {
+  WAITER: "/staff/waiter",
+  KITCHEN: "/staff/kitchen",
+  CASHIER: "/staff/cashier",
+  ADMIN: "/staff/admin",
+};
+
+export default function StaffShell({ title, subtitle, children, testId, showBack }) {
   const nav = useNavigate();
   const staff = JSON.parse(localStorage.getItem("staff_info") || "null");
+  const home = ROLE_HOME[staff?.role] || "/staff/login";
 
   const logout = () => {
     localStorage.removeItem("staff_token");
@@ -17,15 +25,34 @@ export default function StaffShell({ title, subtitle, children, testId }) {
       <header className="glass border-b border-white/40 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-brand grid place-items-center text-white">
-              <UtensilsCrossed size={16} />
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-[0.25em] text-ink2 font-semibold">
-                {subtitle || staff?.role}
+            {showBack && (
+              <button
+                onClick={() => (window.history.length > 1 ? nav(-1) : nav(home))}
+                data-testid="staff-back-btn"
+                className="flex items-center gap-1 text-sm text-ink2 hover:text-brand px-2 py-1 rounded-full hover:bg-bg2/60 transition"
+              >
+                <ArrowLeft size={14} />
+                Back
+              </button>
+            )}
+            <button
+              onClick={() => nav(home)}
+              data-testid="staff-home-logo"
+              className="flex items-center gap-3 group"
+              title="Back to dashboard"
+            >
+              <div className="h-9 w-9 rounded-xl bg-brand grid place-items-center text-white group-hover:scale-105 transition">
+                <UtensilsCrossed size={16} />
               </div>
-              <div className="font-heading text-lg font-semibold">{title}</div>
-            </div>
+              <div className="text-left">
+                <div className="text-[10px] uppercase tracking-[0.25em] text-ink2 font-semibold">
+                  {subtitle || staff?.role}
+                </div>
+                <div className="font-heading text-lg font-semibold group-hover:text-brand transition">
+                  {title}
+                </div>
+              </div>
+            </button>
           </div>
           <div className="flex items-center gap-3">
             {staff && (

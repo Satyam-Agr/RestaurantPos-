@@ -34,7 +34,7 @@ export default function MyAccount() {
   }, []);
 
   return (
-    <StaffShell title="My Account" testId="my-account">
+    <StaffShell title="My Account" testId="my-account" showBack>
       <div className="max-w-3xl mx-auto">
         {/* Tab strip */}
         <div className="flex gap-1 mb-6 border-b border-bg2">

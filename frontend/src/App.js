@@ -14,6 +14,12 @@ import MyAccount from "./views/MyAccount";
 import AdminModeSelect from "./views/AdminModeSelect";
 import AdminOverview from "./views/AdminOverview";
 import AdminOperate from "./views/AdminOperate";
+import AdminTablesPage from "./views/AdminTablesPage";
+import AdminMenuPage from "./views/AdminMenuPage";
+import AdminStaffPage from "./views/AdminStaffPage";
+import AdminTableRoster from "./views/AdminTableRoster";
+import AdminBillsPage from "./views/AdminBillsPage";
+import AdminAnalyticsPage from "./views/AdminAnalyticsPage";
 import DebugPanel from "./components/DebugPanel";
 import ProtectedStaffRoute from "./components/ProtectedStaffRoute";
 
@@ -111,6 +117,12 @@ function App() {
             </ProtectedStaffRoute>
           }
         />
+        <Route path="/staff/admin/tables" element={<ProtectedStaffRoute role="ADMIN"><AdminTablesPage /></ProtectedStaffRoute>} />
+        <Route path="/staff/admin/menu" element={<ProtectedStaffRoute role="ADMIN"><AdminMenuPage /></ProtectedStaffRoute>} />
+        <Route path="/staff/admin/staff" element={<ProtectedStaffRoute role="ADMIN"><AdminStaffPage /></ProtectedStaffRoute>} />
+        <Route path="/staff/admin/roster" element={<ProtectedStaffRoute role="ADMIN"><AdminTableRoster /></ProtectedStaffRoute>} />
+        <Route path="/staff/admin/bills" element={<ProtectedStaffRoute role="ADMIN"><AdminBillsPage /></ProtectedStaffRoute>} />
+        <Route path="/staff/admin/analytics" element={<ProtectedStaffRoute role="ADMIN"><AdminAnalyticsPage /></ProtectedStaffRoute>} />
 
         {/* Universal My Account — any signed-in staff */}
         <Route

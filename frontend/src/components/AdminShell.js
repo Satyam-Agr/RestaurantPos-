@@ -43,15 +43,22 @@ export default function AdminShell({ title, children }) {
     <div className="min-h-screen bg-bg flex" data-testid="admin-shell">
       {/* Sidebar */}
       <aside className="w-56 shrink-0 bg-ink text-white min-h-screen p-3 hidden md:flex md:flex-col sticky top-0 h-screen">
-        <div className="flex items-center gap-2 px-3 py-3 mb-2">
-          <div className="h-8 w-8 rounded-lg bg-brand grid place-items-center">
+        <div
+          onClick={() => nav("/staff/admin")}
+          className="flex items-center gap-2 px-3 py-3 mb-2 cursor-pointer group"
+          data-testid="admin-home-logo"
+          title="Back to Management Console"
+        >
+          <div className="h-8 w-8 rounded-lg bg-brand grid place-items-center group-hover:scale-105 transition">
             <ShieldAlert size={14} />
           </div>
           <div>
             <div className="text-[9px] uppercase tracking-widest text-white/50 font-semibold">
               Admin
             </div>
-            <div className="font-heading font-semibold text-sm">Trattoria</div>
+            <div className="font-heading font-semibold text-sm group-hover:text-brand transition">
+              Trattoria
+            </div>
           </div>
         </div>
 

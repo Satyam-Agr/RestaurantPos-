@@ -83,11 +83,6 @@ export default function AdminOverview() {
           </NavLink>
         ))}
       </div>
-
-      <div className="mt-8 p-5 border border-dashed border-bg2 rounded-2xl text-center text-ink2 text-sm">
-        Detail pages (Live Tables · Menu · Staff · Roster · Bills · Analytics) roll out in
-        Phase 2.
-      </div>
     </AdminShell>
   );
 }
