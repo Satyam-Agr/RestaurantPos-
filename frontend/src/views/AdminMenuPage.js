@@ -6,6 +6,7 @@ import {
 } from "../lib/api";
 import { toast } from "sonner";
 import { Plus, Edit2, Trash2, Loader2, X, Save, ImageIcon, ToggleLeft, ToggleRight } from "lucide-react";
+import FilterTabs from "../components/FilterTabs";
 
 export default function AdminMenuPage() {
   const [cats, setCats] = useState([]);
@@ -13,6 +14,7 @@ export default function AdminMenuPage() {
   const [loading, setLoading] = useState(true);
   const [editCat, setEditCat] = useState(null);
   const [editItem, setEditItem] = useState(null);
+  const [filter, setFilter] = useState("all");
 
   const load = async () => {
     setLoading(true);
@@ -27,9 +29,12 @@ export default function AdminMenuPage() {
 
   const byCat = useMemo(() => {
     const map = {};
-    items.forEach((it) => { (map[it.categoryId] ||= []).push(it); });
+    const passes = (it) =>
+      filter === "all" ||
+      (filter === "live" ? it.available : !it.available);
+    items.filter(passes).forEach((it) => { (map[it.categoryId] ||= []).push(it); });
     return map;
-  }, [items]);
+  }, [items, filter]);
 
   const toggleAvail = async (it) => {
     try { await adminUpdateItem(it.id, { available: !it.available }); load(); }
@@ -51,9 +56,20 @@ export default function AdminMenuPage() {
 
   return (
     <AdminShell title="Menu">
-      <div className="flex justify-end mb-4 gap-2">
-        <button onClick={() => setEditCat({})} data-testid="new-category-btn" className="flex items-center gap-1.5 rounded-full border border-bg2 hover:border-brand hover:text-brand text-sm px-4 py-2 transition"><Plus size={12} />Category</button>
-        <button onClick={() => setEditItem({ available: true })} data-testid="new-item-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft transition"><Plus size={12} />New Item</button>
+      <div className="flex justify-between mb-4 items-center flex-wrap gap-2">
+        <FilterTabs
+          value={filter}
+          onChange={setFilter}
+          counts={{
+            all: items.length,
+            live: items.filter((i) => i.available).length,
+            disabled: items.filter((i) => !i.available).length,
+          }}
+        />
+        <div className="flex gap-2">
+          <button onClick={() => setEditCat({})} data-testid="new-category-btn" className="flex items-center gap-1.5 rounded-full border border-bg2 hover:border-brand hover:text-brand text-sm px-4 py-2 transition"><Plus size={12} />Category</button>
+          <button onClick={() => setEditItem({ available: true })} data-testid="new-item-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft transition"><Plus size={12} />New Item</button>
+        </div>
       </div>
 
       {loading ? <Loader2 className="animate-spin text-brand mx-auto mt-10" size={24} /> : (

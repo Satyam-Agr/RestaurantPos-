@@ -87,6 +87,35 @@ api.interceptors.response.use(
 
 export const API_BASE_URL = BASE_URL;
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const dateOnlyToInstant = (value, endOfDay = false) => {
+  if (typeof value !== "string" || !DATE_ONLY_RE.test(value)) return value;
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(
+    year,
+    month - 1,
+    day,
+    endOfDay ? 23 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 999 : 0
+  );
+
+  return date.toISOString();
+};
+
+const withIsoInstantRange = (params) => {
+  if (!params) return params;
+
+  return {
+    ...params,
+    from: dateOnlyToInstant(params.from),
+    to: dateOnlyToInstant(params.to, true),
+  };
+};
+
 // ---------- Endpoint helpers ----------
 
 // Public

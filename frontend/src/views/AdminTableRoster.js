@@ -3,12 +3,14 @@ import AdminShell from "../components/AdminShell";
 import { adminTablesRoster, adminCreateTable, adminUpdateTable } from "../lib/api";
 import { toast } from "sonner";
 import { Plus, Edit2, Loader2, X, QrCode, Printer, Save, Ban } from "lucide-react";
+import FilterTabs from "../components/FilterTabs";
 
 export default function AdminTableRoster() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState(null);
   const [qr, setQr] = useState(null);
+  const [filter, setFilter] = useState("all");
 
   const load = async () => {
     setLoading(true);
@@ -25,12 +27,21 @@ export default function AdminTableRoster() {
 
   return (
     <AdminShell title="Table Roster">
-      <div className="flex justify-end mb-4">
+      <div className="flex justify-between mb-4 items-center flex-wrap gap-2">
+        <FilterTabs
+          value={filter}
+          onChange={setFilter}
+          counts={{
+            all: rows.length,
+            live: rows.filter((r) => !r.retired).length,
+            disabled: rows.filter((r) => r.retired).length,
+          }}
+        />
         <button onClick={() => setEdit({})} data-testid="new-table-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft"><Plus size={12} />New Table</button>
       </div>
       {loading ? <Loader2 className="animate-spin text-brand mx-auto mt-10" size={24} /> : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          {rows.map((r) => (
+          {rows.filter((r) => filter === "all" || (filter === "live" ? !r.retired : r.retired)).map((r) => (
             <div key={r.id} className={`bg-surface border ${r.retired ? "border-bg2 opacity-60" : "border-bg2"} rounded-2xl p-4`} data-testid={`roster-${r.id}`}>
               <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Table</div>
               <div className="font-heading text-3xl font-bold">{r.tableNumber}</div>

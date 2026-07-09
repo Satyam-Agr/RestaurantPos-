@@ -46,7 +46,7 @@ export default function AdminBillsPage() {
               {list.map((b) => (
                 <tr key={b.id} className="border-t border-bg2" data-testid={`bill-row-${b.id}`}>
                   <td className="px-4 py-2 font-mono">#{b.id}</td>
-                  <td className="px-4 py-2">T{b.tableNumber}</td>
+                  <td className="px-4 py-2">{b.tableNumber}</td>
                   <td className="px-4 py-2 text-xs">{b.generatedAt ? new Date(b.generatedAt).toLocaleString() : "—"}</td>
                   <td className="px-4 py-2 text-right font-mono">₹{Number(b.total || 0).toFixed(2)}</td>
                   <td className="px-4 py-2"><span className={`text-[10px] uppercase tracking-widest font-semibold px-2 py-0.5 rounded-full ${b.paidAt ? "bg-successc/15 text-successc" : "bg-amber-100 text-amber-800"}`}>{b.paidAt ? `Paid · ${b.paymentMethod || ""}` : "Unpaid"}</span></td>

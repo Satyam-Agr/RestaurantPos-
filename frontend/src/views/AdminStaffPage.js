@@ -3,6 +3,7 @@ import AdminShell from "../components/AdminShell";
 import { adminStaffList, adminCreateStaff, adminUpdateStaff } from "../lib/api";
 import { toast } from "sonner";
 import { Plus, Edit2, Loader2, X, Save, User, ShieldCheck, ShieldOff } from "lucide-react";
+import FilterTabs from "../components/FilterTabs";
 
 const ROLES = ["WAITER", "KITCHEN", "CASHIER", "ADMIN"];
 
@@ -10,6 +11,7 @@ export default function AdminStaffPage() {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState(null);
+  const [filter, setFilter] = useState("all");
 
   const load = async () => {
     setLoading(true);
@@ -26,7 +28,16 @@ export default function AdminStaffPage() {
 
   return (
     <AdminShell title="Staff">
-      <div className="flex justify-end mb-4">
+      <div className="flex justify-between mb-4 items-center flex-wrap gap-2">
+        <FilterTabs
+          value={filter}
+          onChange={setFilter}
+          counts={{
+            all: list.length,
+            live: list.filter((s) => s.active).length,
+            disabled: list.filter((s) => !s.active).length,
+          }}
+        />
         <button onClick={() => setEdit({ role: "WAITER", active: true })} data-testid="new-staff-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft"><Plus size={12} />New Staff</button>
       </div>
 
@@ -37,7 +48,7 @@ export default function AdminStaffPage() {
               <tr><th className="text-left px-4 py-2">Name</th><th className="text-left px-4 py-2">Username</th><th className="text-left px-4 py-2">Role</th><th className="text-left px-4 py-2">Status</th><th className="text-right px-4 py-2">Actions</th></tr>
             </thead>
             <tbody>
-              {list.map((s) => (
+              {list.filter((s) => filter === "all" || (filter === "live" ? s.active : !s.active)).map((s) => (
                 <tr key={s.id} className="border-t border-bg2" data-testid={`staff-row-${s.id}`}>
                   <td className="px-4 py-2 font-medium">{s.name}</td>
                   <td className="px-4 py-2 font-mono text-xs">@{s.username}</td>
