@@ -4,11 +4,13 @@ import { adminTablesRoster, adminCreateTable, adminUpdateTable } from "../lib/ap
 import { toast } from "sonner";
 import { Plus, Edit2, Loader2, X, QrCode, Printer, Save, Ban } from "lucide-react";
 import FilterTabs from "../components/FilterTabs";
+import BulkCreateModal, { BulkField } from "../components/BulkCreateModal";
 
 export default function AdminTableRoster() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState(null);
+  const [creating, setCreating] = useState(false);
   const [qr, setQr] = useState(null);
   const [filter, setFilter] = useState("all");
 
@@ -37,7 +39,7 @@ export default function AdminTableRoster() {
             disabled: rows.filter((r) => r.retired).length,
           }}
         />
-        <button onClick={() => setEdit({})} data-testid="new-table-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft"><Plus size={12} />New Table</button>
+        <button onClick={() => setCreating(true)} data-testid="new-table-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft"><Plus size={12} />New Table</button>
       </div>
       {loading ? <Loader2 className="animate-spin text-brand mx-auto mt-10" size={24} /> : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
@@ -59,6 +61,32 @@ export default function AdminTableRoster() {
 
       {edit && <EditModal row={edit} onClose={() => setEdit(null)} onDone={() => { setEdit(null); load(); }} />}
       {qr && <QRModal row={qr} onClose={() => setQr(null)} />}
+      {creating && (
+        <BulkCreateModal
+          title="Add Tables"
+          emptyDraft={() => ({ tableNumber: "" })}
+          validate={(d) => {
+            if (!String(d.tableNumber ?? "").trim()) return "Table number is required";
+            return null;
+          }}
+          renderRow={(d, patch) => (
+            <BulkField
+              label="Table number"
+              value={d.tableNumber}
+              onChange={(v) => patch({ tableNumber: v })}
+              required
+            />
+          )}
+          onSubmit={(pin, entries) =>
+            adminCreateTable(
+              pin,
+              entries.map((e) => ({ tableNumber: String(e.tableNumber).trim() }))
+            )
+          }
+          onClose={() => setCreating(false)}
+          onDone={() => { setCreating(false); load(); }}
+        />
+      )}
     </AdminShell>
   );
 }
@@ -70,9 +98,8 @@ function EditModal({ row, onClose, onDone }) {
     e.preventDefault();
     setBusy(true);
     try {
-      if (row.id) await adminUpdateTable(row.id, { tableNumber: n });
-      else await adminCreateTable(n);
-      toast.success(row.id ? "Renamed" : "Created");
+      await adminUpdateTable(row.id, { tableNumber: n });
+      toast.success("Renamed");
       onDone();
     } catch (e2) {
       if (e2.status === 409) toast.error("Table number already in use.");
@@ -80,7 +107,7 @@ function EditModal({ row, onClose, onDone }) {
     } finally { setBusy(false); }
   };
   return <div className="fixed inset-0 z-[60] bg-black/50 grid place-items-center p-4" onClick={onClose}><form onSubmit={submit} onClick={(e) => e.stopPropagation()} className="bg-surface rounded-3xl max-w-sm w-full p-6 shadow-lift">
-    <div className="flex justify-between mb-4"><h3 className="font-heading text-lg font-semibold">{row.id ? "Rename Table" : "New Table"}</h3><button type="button" onClick={onClose}><X size={16} /></button></div>
+    <div className="flex justify-between mb-4"><h3 className="font-heading text-lg font-semibold">Rename Table</h3><button type="button" onClick={onClose}><X size={16} /></button></div>
     <label className="block"><span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Table Number *</span><input value={n} onChange={(e) => setN(e.target.value)} autoFocus className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand" /></label>
     <button type="submit" disabled={busy || !n} data-testid="table-save" className="mt-5 w-full flex items-center justify-center gap-2 rounded-full bg-brand hover:bg-brandHover text-white py-2.5 disabled:opacity-50">{busy ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}Save</button>
   </form></div>;

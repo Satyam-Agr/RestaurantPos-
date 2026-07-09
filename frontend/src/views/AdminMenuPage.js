@@ -7,6 +7,7 @@ import {
 import { toast } from "sonner";
 import { Plus, Edit2, Trash2, Loader2, X, Save, ImageIcon, ToggleLeft, ToggleRight } from "lucide-react";
 import FilterTabs from "../components/FilterTabs";
+import BulkCreateModal, { BulkField } from "../components/BulkCreateModal";
 
 export default function AdminMenuPage() {
   const [cats, setCats] = useState([]);
@@ -14,6 +15,8 @@ export default function AdminMenuPage() {
   const [loading, setLoading] = useState(true);
   const [editCat, setEditCat] = useState(null);
   const [editItem, setEditItem] = useState(null);
+  const [creatingCat, setCreatingCat] = useState(false);
+  const [creatingItem, setCreatingItem] = useState(false);
   const [filter, setFilter] = useState("all");
 
   const load = async () => {
@@ -67,8 +70,8 @@ export default function AdminMenuPage() {
           }}
         />
         <div className="flex gap-2">
-          <button onClick={() => setEditCat({})} data-testid="new-category-btn" className="flex items-center gap-1.5 rounded-full border border-bg2 hover:border-brand hover:text-brand text-sm px-4 py-2 transition"><Plus size={12} />Category</button>
-          <button onClick={() => setEditItem({ available: true })} data-testid="new-item-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft transition"><Plus size={12} />New Item</button>
+          <button onClick={() => setCreatingCat(true)} data-testid="new-category-btn" className="flex items-center gap-1.5 rounded-full border border-bg2 hover:border-brand hover:text-brand text-sm px-4 py-2 transition"><Plus size={12} />Category</button>
+          <button onClick={() => setCreatingItem(true)} data-testid="new-item-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft transition"><Plus size={12} />New Item</button>
         </div>
       </div>
 
@@ -108,6 +111,78 @@ export default function AdminMenuPage() {
 
       {editCat && <CategoryModal cat={editCat} onClose={() => setEditCat(null)} onDone={() => { setEditCat(null); load(); }} />}
       {editItem && <ItemModal item={editItem} cats={cats} onClose={() => setEditItem(null)} onDone={() => { setEditItem(null); load(); }} />}
+
+      {creatingCat && (
+        <BulkCreateModal
+          title="Add Categories"
+          emptyDraft={() => ({ name: "" })}
+          validate={(d) => (!d.name?.trim() ? "Name is required" : null)}
+          renderRow={(d, patch) => (
+            <BulkField label="Category name" value={d.name} onChange={(v) => patch({ name: v })} required />
+          )}
+          onSubmit={(pin, entries) =>
+            adminCreateCategory(pin, entries.map((e) => ({ name: e.name.trim() })))
+          }
+          onClose={() => setCreatingCat(false)}
+          onDone={() => { setCreatingCat(false); load(); }}
+        />
+      )}
+
+      {creatingItem && (
+        <BulkCreateModal
+          title="Add Menu Items"
+          emptyDraft={() => ({
+            name: "", price: "", description: "", imageUrl: "",
+            categoryId: cats[0]?.id, available: true,
+          })}
+          validate={(d) => {
+            if (!d.name?.trim()) return "Name is required";
+            if (!d.categoryId) return "Category is required";
+            const p = Number(d.price);
+            if (!Number.isFinite(p) || p < 0) return "Valid price is required";
+            return null;
+          }}
+          renderRow={(d, patch) => (
+            <div className="space-y-3">
+              <BulkField label="Name" value={d.name} onChange={(v) => patch({ name: v })} required />
+              <div className="grid grid-cols-2 gap-3">
+                <BulkField label="Price (₹)" type="number" value={d.price} onChange={(v) => patch({ price: v })} required />
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Category *</span>
+                  <select
+                    value={d.categoryId ?? ""}
+                    onChange={(e) => patch({ categoryId: Number(e.target.value) })}
+                    className="mt-1 w-full bg-surface border border-bg2 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-brand text-sm"
+                  >
+                    {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <BulkField label="Description" value={d.description} onChange={(v) => patch({ description: v })} />
+              <BulkField label="Image URL" value={d.imageUrl} onChange={(v) => patch({ imageUrl: v })} />
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={!!d.available} onChange={(e) => patch({ available: e.target.checked })} />
+                Available
+              </label>
+            </div>
+          )}
+          onSubmit={(pin, entries) =>
+            adminCreateItem(
+              pin,
+              entries.map((e) => ({
+                name: e.name.trim(),
+                price: Number(e.price),
+                description: e.description || "",
+                imageUrl: e.imageUrl || "",
+                categoryId: e.categoryId,
+                available: !!e.available,
+              }))
+            )
+          }
+          onClose={() => setCreatingItem(false)}
+          onDone={() => { setCreatingItem(false); load(); }}
+        />
+      )}
     </AdminShell>
   );
 }
@@ -120,14 +195,13 @@ function CategoryModal({ cat, onClose, onDone }) {
     if (!name.trim()) return;
     setBusy(true);
     try {
-      if (cat.id) await adminUpdateCategory(cat.id, { name });
-      else await adminCreateCategory({ name });
-      toast.success(cat.id ? "Updated" : "Created");
+      await adminUpdateCategory(cat.id, { name });
+      toast.success("Updated");
       onDone();
     } catch (e2) { toast.error(e2.message); }
     finally { setBusy(false); }
   };
-  return <ModalShell title={cat.id ? "Edit Category" : "New Category"} onClose={onClose}>
+  return <ModalShell title="Edit Category" onClose={onClose}>
     <form onSubmit={submit}>
       <Field label="Category name" value={name} onChange={setName} required autoFocus />
       <SubmitBar onClose={onClose} busy={busy} />
@@ -147,15 +221,13 @@ function ItemModal({ item, cats, onClose, onDone }) {
     if (!f.name.trim() || !f.categoryId) return toast.error("Name and category required");
     setBusy(true);
     try {
-      const body = { ...f, price: Number(f.price) };
-      if (item.id) await adminUpdateItem(item.id, body);
-      else await adminCreateItem(body);
-      toast.success(item.id ? "Updated" : "Created");
+      await adminUpdateItem(item.id, { ...f, price: Number(f.price) });
+      toast.success("Updated");
       onDone();
     } catch (e2) { toast.error(e2.message); }
     finally { setBusy(false); }
   };
-  return <ModalShell title={item.id ? "Edit Item" : "New Item"} onClose={onClose}>
+  return <ModalShell title="Edit Item" onClose={onClose}>
     <form onSubmit={submit} className="space-y-3">
       <Field label="Name" value={f.name} onChange={set("name")} required autoFocus />
       <div className="grid grid-cols-2 gap-3">

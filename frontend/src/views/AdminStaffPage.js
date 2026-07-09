@@ -4,6 +4,7 @@ import { adminStaffList, adminCreateStaff, adminUpdateStaff } from "../lib/api";
 import { toast } from "sonner";
 import { Plus, Edit2, Loader2, X, Save, User, ShieldCheck, ShieldOff } from "lucide-react";
 import FilterTabs from "../components/FilterTabs";
+import BulkCreateModal, { BulkField } from "../components/BulkCreateModal";
 
 const ROLES = ["WAITER", "KITCHEN", "CASHIER", "ADMIN"];
 
@@ -11,6 +12,7 @@ export default function AdminStaffPage() {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState(null);
+  const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState("all");
 
   const load = async () => {
@@ -38,7 +40,7 @@ export default function AdminStaffPage() {
             disabled: list.filter((s) => !s.active).length,
           }}
         />
-        <button onClick={() => setEdit({ role: "WAITER", active: true })} data-testid="new-staff-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft"><Plus size={12} />New Staff</button>
+        <button onClick={() => setCreating(true)} data-testid="new-staff-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft"><Plus size={12} />New Staff</button>
       </div>
 
       {loading ? <Loader2 className="animate-spin text-brand mx-auto mt-10" size={24} /> : (
@@ -69,6 +71,42 @@ export default function AdminStaffPage() {
       )}
 
       {edit && <StaffModal staff={edit} onClose={() => setEdit(null)} onDone={() => { setEdit(null); load(); }} />}
+      {creating && (
+        <BulkCreateModal
+          title="Add Staff"
+          emptyDraft={() => ({ name: "", username: "", password: "", role: "WAITER", email: "", contactNumber: "", address: "" })}
+          validate={(d) => {
+            if (!d.name?.trim()) return "Full name is required";
+            if (!d.username?.trim()) return "Username is required";
+            if (!d.password) return "Initial password is required";
+            if (!ROLES.includes(d.role)) return "Invalid role";
+            return null;
+          }}
+          renderRow={(d, patch) => (
+            <div className="space-y-3">
+              <BulkField label="Full name" value={d.name} onChange={(v) => patch({ name: v })} required />
+              <div className="grid grid-cols-2 gap-3">
+                <BulkField label="Username" value={d.username} onChange={(v) => patch({ username: v })} required />
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Role *</span>
+                  <select value={d.role} onChange={(e) => patch({ role: e.target.value })} className="mt-1 w-full bg-surface border border-bg2 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-brand text-sm">
+                    {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </label>
+              </div>
+              <BulkField label="Initial password" type="password" value={d.password} onChange={(v) => patch({ password: v })} required />
+              <div className="grid grid-cols-2 gap-3">
+                <BulkField label="Email" value={d.email} onChange={(v) => patch({ email: v })} />
+                <BulkField label="Contact" value={d.contactNumber} onChange={(v) => patch({ contactNumber: v })} />
+              </div>
+              <BulkField label="Address" value={d.address} onChange={(v) => patch({ address: v })} />
+            </div>
+          )}
+          onSubmit={(pin, entries) => adminCreateStaff(pin, entries)}
+          onClose={() => setCreating(false)}
+          onDone={() => { setCreating(false); load(); }}
+        />
+      )}
     </AdminShell>
   );
 }
@@ -77,23 +115,20 @@ function StaffModal({ staff, onClose, onDone }) {
   const [f, setF] = useState({
     name: staff.name || "", username: staff.username || "", email: staff.email || "",
     contactNumber: staff.contactNumber || "", address: staff.address || "",
-    role: staff.role || "WAITER", password: "",
+    role: staff.role || "WAITER",
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const isNew = !staff.id;
   const set = (k) => (v) => setF({ ...f, [k]: v });
 
   const submit = async (e) => {
     e.preventDefault();
     setErr("");
     if (!f.name.trim() || !f.username.trim()) return setErr("Name and username required");
-    if (isNew && !f.password) return setErr("Initial password required");
     setBusy(true);
     try {
-      if (isNew) await adminCreateStaff(f);
-      else await adminUpdateStaff(staff.id, { name: f.name, username: f.username, email: f.email, contactNumber: f.contactNumber, address: f.address, role: f.role });
-      toast.success(isNew ? "Staff created" : "Updated");
+      await adminUpdateStaff(staff.id, { name: f.name, username: f.username, email: f.email, contactNumber: f.contactNumber, address: f.address, role: f.role });
+      toast.success("Updated");
       onDone();
     } catch (e2) {
       if (e2.status === 409) setErr("Username already taken.");
@@ -104,14 +139,13 @@ function StaffModal({ staff, onClose, onDone }) {
   return (
     <div className="fixed inset-0 z-[60] bg-black/50 grid place-items-center p-4" onClick={onClose}>
       <form onSubmit={submit} onClick={(e) => e.stopPropagation()} className="bg-surface rounded-3xl max-w-md w-full p-6 shadow-lift max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4"><h3 className="font-heading text-lg font-semibold flex items-center gap-2"><User size={14} />{isNew ? "New Staff" : "Edit Staff"}</h3><button type="button" onClick={onClose}><X size={16} /></button></div>
+        <div className="flex items-center justify-between mb-4"><h3 className="font-heading text-lg font-semibold flex items-center gap-2"><User size={14} />Edit Staff</h3><button type="button" onClick={onClose}><X size={16} /></button></div>
         <div className="space-y-3">
           <Field label="Full name" value={f.name} onChange={set("name")} required />
           <div className="grid grid-cols-2 gap-3">
             <Field label="Username" value={f.username} onChange={set("username")} required />
             <label className="block"><span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Role *</span><select value={f.role} onChange={(e) => set("role")(e.target.value)} className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand">{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select></label>
           </div>
-          {isNew && <Field label="Initial password" type="password" value={f.password} onChange={set("password")} required />}
           <Field label="Email" value={f.email} onChange={set("email")} />
           <Field label="Contact" value={f.contactNumber} onChange={set("contactNumber")} />
           <Field label="Address" value={f.address} onChange={set("address")} />
@@ -121,7 +155,7 @@ function StaffModal({ staff, onClose, onDone }) {
           <button type="button" onClick={onClose} className="rounded-full border border-bg2 px-4 py-2 text-sm">Cancel</button>
           <button type="submit" disabled={busy} data-testid="staff-save" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-lift disabled:opacity-50">{busy ? <Loader2 className="animate-spin" size={12} /> : <Save size={12} />}Save</button>
         </div>
-        {!isNew && <p className="mt-3 text-xs text-ink2 italic text-center">Passwords are self-service — even admins can't reset them.</p>}
+        <p className="mt-3 text-xs text-ink2 italic text-center">Passwords are self-service — even admins can&apos;t reset them.</p>
       </form>
     </div>
   );

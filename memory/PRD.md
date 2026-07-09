@@ -15,6 +15,9 @@ Build a professional, reactive React (no TypeScript) frontend for an already-bui
 3. **Kitchen** — advances items `CONFIRMED` → `PREPARING` → `READY`.
 4. **Cashier** — sees pending bills, generates bill (tax %, discount), records payment (CASH/CARD/UPI/OTHER).
 
+## What's Been Implemented — Feb 2026
+- **Admin bulk create + PIN gate (Feb 2026)**: All admin-side "Add" actions (Staff, Tables, Categories, Menu Items) now open a shared `BulkCreateModal` that accepts a variable-length list of drafts and requires a fresh admin PIN via `PinModal` before submission. Payload shape matches the updated backend API exactly (`{ pin, staff: [] }`, `{ pin, tables: [] }`, `{ pin, categories: [] }`, `{ pin, items: [] }`). Single-entity Edit modals remain unchanged.
+
 ## What's Been Implemented — Jan 2026
 - Customer entry with QR-token validation and phone-number input (`/?qr=<token>`)
 - Table access page: auto-detects existing sessions → Create or Join-by-PIN

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import PinModal from "./PinModal";
-import { X, Plus, Trash2, Loader2, ShieldCheck } from "lucide-react";
+import { X, Plus, Trash2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 /**
