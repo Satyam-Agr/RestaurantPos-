@@ -188,8 +188,8 @@ export const changeMyPassword = (body) =>
 
 // ---------- Admin ----------
 export const adminMe = () => api.get("/api/admin/me").then((r) => r.data);
-export const adminSetPin = (pin) =>
-  api.patch("/api/admin/me/pin", { pin }).then((r) => r.data);
+export const adminSetPin = (currentPassword, newPin) =>
+  api.patch("/api/admin/me/pin", { currentPassword, newPin }).then((r) => r.data);
 
 // Tables (admin variant + audit)
 export const adminTablesList = (params) =>
