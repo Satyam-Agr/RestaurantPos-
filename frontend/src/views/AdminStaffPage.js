@@ -1,10 +1,17 @@
 import React, { useEffect, useState } from "react";
 import AdminShell from "../components/AdminShell";
-import { adminStaffList, adminCreateStaff, adminUpdateStaff } from "../lib/api";
+import {
+  adminStaffList,
+  adminCreateStaff,
+  adminUpdateStaff,
+  adminActivateStaff,
+  adminDeactivateStaff,
+} from "../lib/api";
 import { toast } from "sonner";
-import { Plus, Edit2, Loader2, X, Save, User, ShieldCheck, ShieldOff } from "lucide-react";
+import { Plus, Edit2, Loader2, X, Save, User, Power } from "lucide-react";
 import FilterTabs from "../components/FilterTabs";
 import BulkCreateModal, { BulkField } from "../components/BulkCreateModal";
+import StatusManagerModal from "../components/StatusManagerModal";
 
 const ROLES = ["WAITER", "KITCHEN", "CASHIER", "ADMIN"];
 
@@ -13,6 +20,7 @@ export default function AdminStaffPage() {
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [managing, setManaging] = useState(false);
   const [filter, setFilter] = useState("all");
 
   const load = async () => {
@@ -21,12 +29,6 @@ export default function AdminStaffPage() {
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
-
-  const toggleActive = async (s) => {
-    if (!window.confirm(`${s.active ? "Deactivate" : "Reactivate"} ${s.name}?`)) return;
-    try { await adminUpdateStaff(s.id, { active: !s.active }); load(); }
-    catch (e) { toast.error(e.message); }
-  };
 
   return (
     <AdminShell title="Staff">
@@ -40,7 +42,24 @@ export default function AdminStaffPage() {
             disabled: list.filter((s) => !s.active).length,
           }}
         />
-        <button onClick={() => setCreating(true)} data-testid="new-staff-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft"><Plus size={12} />New Staff</button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setManaging(true)}
+            data-testid="manage-staff-status-btn"
+            className="flex items-center gap-1.5 rounded-full border border-bg2 hover:border-brand hover:text-brand text-sm px-4 py-2 transition"
+          >
+            <Power size={12} />
+            Manage status
+          </button>
+          <button
+            onClick={() => setCreating(true)}
+            data-testid="new-staff-btn"
+            className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft"
+          >
+            <Plus size={12} />
+            New Staff
+          </button>
+        </div>
       </div>
 
       {loading ? <Loader2 className="animate-spin text-brand mx-auto mt-10" size={24} /> : (
@@ -58,9 +77,6 @@ export default function AdminStaffPage() {
                   <td className="px-4 py-2"><span className={`text-[10px] uppercase tracking-widest font-semibold px-2 py-0.5 rounded-full ${s.active ? "bg-successc/15 text-successc" : "bg-red-100 text-red-700"}`}>{s.active ? "Active" : "Inactive"}</span></td>
                   <td className="px-4 py-2 text-right">
                     <button onClick={() => setEdit(s)} className="text-ink2 hover:text-brand p-1" data-testid={`edit-staff-${s.id}`}><Edit2 size={12} /></button>
-                    <button onClick={() => toggleActive(s)} className={`p-1 ${s.active ? "text-ink2 hover:text-destructive" : "text-ink2 hover:text-successc"}`} data-testid={`toggle-staff-${s.id}`}>
-                      {s.active ? <ShieldOff size={12} /> : <ShieldCheck size={12} />}
-                    </button>
                   </td>
                 </tr>
               ))}
@@ -105,6 +121,39 @@ export default function AdminStaffPage() {
           onSubmit={(pin, entries) => adminCreateStaff(pin, entries)}
           onClose={() => setCreating(false)}
           onDone={() => { setCreating(false); load(); }}
+        />
+      )}
+
+      {managing && (
+        <StatusManagerModal
+          title="Manage Staff Status"
+          activeLabel="Active"
+          inactiveLabel="Inactive"
+          activeRows={list.filter((s) => s.active)}
+          inactiveRows={list.filter((s) => !s.active)}
+          getId={(s) => s.id}
+          searchOf={(s) => `${s.name} ${s.username} ${s.role}`}
+          renderRow={(s) => (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate">{s.name}</div>
+                <div className="text-xs text-ink2 font-mono truncate">@{s.username}</div>
+              </div>
+              <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold shrink-0">{s.role}</span>
+            </div>
+          )}
+          activateAction={{
+            verb: "Activate",
+            danger: false,
+            run: (pin, ids) => adminActivateStaff(pin, ids),
+          }}
+          deactivateAction={{
+            verb: "Deactivate",
+            danger: true,
+            run: (pin, ids) => adminDeactivateStaff(pin, ids),
+          }}
+          onClose={() => setManaging(false)}
+          onDone={() => { setManaging(false); load(); }}
         />
       )}
     </AdminShell>

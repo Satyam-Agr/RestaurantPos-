@@ -239,6 +239,10 @@ export const adminCreateTable = (pin, tables) =>
   api.post("/api/admin/tables", { pin, tables }).then((r) => r.data);
 export const adminUpdateTable = (tableId, body) =>
   api.patch(`/api/admin/tables/${tableId}`, body).then((r) => r.data);
+export const adminRetireTables = (pin, tableIds) =>
+  api.post("/api/admin/tables/retire", { pin, tableIds }).then((r) => r.data);
+export const adminReactivateTables = (pin, tableIds) =>
+  api.post("/api/admin/tables/reactivate", { pin, tableIds }).then((r) => r.data);
 
 // Staff
 export const adminStaffList = () => api.get("/api/admin/staff").then((r) => r.data);
@@ -246,6 +250,10 @@ export const adminCreateStaff = (pin, staff) =>
   api.post("/api/admin/staff", { pin, staff }).then((r) => r.data);
 export const adminUpdateStaff = (staffId, body) =>
   api.patch(`/api/admin/staff/${staffId}`, body).then((r) => r.data);
+export const adminActivateStaff = (pin, staffIds) =>
+  api.post("/api/admin/staff/activate", { pin, staffIds }).then((r) => r.data);
+export const adminDeactivateStaff = (pin, staffIds) =>
+  api.post("/api/admin/staff/deactivate", { pin, staffIds }).then((r) => r.data);
 
 // Menu
 export const adminMenuCategories = () =>
@@ -262,6 +270,8 @@ export const adminCreateItem = (pin, items) =>
   api.post("/api/admin/menu/items", { pin, items }).then((r) => r.data);
 export const adminUpdateItem = (id, body) =>
   api.patch(`/api/admin/menu/items/${id}`, body).then((r) => r.data);
+export const adminSetItemAvailability = (id, available) =>
+  api.patch(`/api/admin/menu/items/${id}/availability`, { available }).then((r) => r.data);
 export const adminDeleteItem = (id) =>
   api.delete(`/api/admin/menu/items/${id}`).then((r) => r.data);
 

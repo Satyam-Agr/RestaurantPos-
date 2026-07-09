@@ -1,16 +1,24 @@
 import React, { useEffect, useState } from "react";
 import AdminShell from "../components/AdminShell";
-import { adminTablesRoster, adminCreateTable, adminUpdateTable } from "../lib/api";
+import {
+  adminTablesRoster,
+  adminCreateTable,
+  adminUpdateTable,
+  adminRetireTables,
+  adminReactivateTables,
+} from "../lib/api";
 import { toast } from "sonner";
-import { Plus, Edit2, Loader2, X, QrCode, Printer, Save, Ban } from "lucide-react";
+import { Plus, Edit2, Loader2, X, QrCode, Printer, Save, Power } from "lucide-react";
 import FilterTabs from "../components/FilterTabs";
 import BulkCreateModal, { BulkField } from "../components/BulkCreateModal";
+import StatusManagerModal from "../components/StatusManagerModal";
 
 export default function AdminTableRoster() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [managing, setManaging] = useState(false);
   const [qr, setQr] = useState(null);
   const [filter, setFilter] = useState("all");
 
@@ -20,12 +28,6 @@ export default function AdminTableRoster() {
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
-
-  const retire = async (r) => {
-    if (!window.confirm(`Retire Table ${r.tableNumber}? It won't be usable until reactivated.`)) return;
-    try { await adminUpdateTable(r.id, { retired: !r.retired }); load(); }
-    catch (e) { toast.error(e.message); }
-  };
 
   return (
     <AdminShell title="Table Roster">
@@ -39,7 +41,24 @@ export default function AdminTableRoster() {
             disabled: rows.filter((r) => r.retired).length,
           }}
         />
-        <button onClick={() => setCreating(true)} data-testid="new-table-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft"><Plus size={12} />New Table</button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setManaging(true)}
+            data-testid="manage-table-status-btn"
+            className="flex items-center gap-1.5 rounded-full border border-bg2 hover:border-brand hover:text-brand text-sm px-4 py-2 transition"
+          >
+            <Power size={12} />
+            Manage status
+          </button>
+          <button
+            onClick={() => setCreating(true)}
+            data-testid="new-table-btn"
+            className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft"
+          >
+            <Plus size={12} />
+            New Table
+          </button>
+        </div>
       </div>
       {loading ? <Loader2 className="animate-spin text-brand mx-auto mt-10" size={24} /> : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
@@ -51,7 +70,6 @@ export default function AdminTableRoster() {
               <div className="mt-3 flex items-center gap-1">
                 <button onClick={() => setEdit(r)} className="text-xs text-ink2 hover:text-brand p-1" data-testid={`edit-${r.id}`}><Edit2 size={12} /></button>
                 <button onClick={() => setQr(r)} className="text-xs text-ink2 hover:text-brand p-1" data-testid={`qr-${r.id}`}><QrCode size={12} /></button>
-                <button onClick={() => retire(r)} className="text-xs text-ink2 hover:text-destructive p-1"><Ban size={12} /></button>
               </div>
             </div>
           ))}
@@ -85,6 +103,36 @@ export default function AdminTableRoster() {
           }
           onClose={() => setCreating(false)}
           onDone={() => { setCreating(false); load(); }}
+        />
+      )}
+
+      {managing && (
+        <StatusManagerModal
+          title="Manage Table Status"
+          activeLabel="Live"
+          inactiveLabel="Retired"
+          activeRows={rows.filter((r) => !r.retired)}
+          inactiveRows={rows.filter((r) => r.retired)}
+          getId={(r) => r.id}
+          searchOf={(r) => String(r.tableNumber)}
+          renderRow={(r) => (
+            <div className="flex items-center gap-3">
+              <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Table</div>
+              <div className="font-heading text-lg font-bold">{r.tableNumber}</div>
+            </div>
+          )}
+          activateAction={{
+            verb: "Reactivate",
+            danger: false,
+            run: (pin, ids) => adminReactivateTables(pin, ids),
+          }}
+          deactivateAction={{
+            verb: "Retire",
+            danger: true,
+            run: (pin, ids) => adminRetireTables(pin, ids),
+          }}
+          onClose={() => setManaging(false)}
+          onDone={() => { setManaging(false); load(); }}
         />
       )}
     </AdminShell>

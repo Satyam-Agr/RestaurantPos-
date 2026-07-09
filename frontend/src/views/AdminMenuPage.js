@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import AdminShell from "../components/AdminShell";
 import {
   adminMenuCategories, adminCreateCategory, adminUpdateCategory, adminDeleteCategory,
-  adminMenuItems, adminCreateItem, adminUpdateItem, adminDeleteItem,
+  adminMenuItems, adminCreateItem, adminUpdateItem, adminDeleteItem, adminSetItemAvailability,
 } from "../lib/api";
 import { toast } from "sonner";
 import { Plus, Edit2, Trash2, Loader2, X, Save, ImageIcon, ToggleLeft, ToggleRight } from "lucide-react";
@@ -40,7 +40,7 @@ export default function AdminMenuPage() {
   }, [items, filter]);
 
   const toggleAvail = async (it) => {
-    try { await adminUpdateItem(it.id, { available: !it.available }); load(); }
+    try { await adminSetItemAvailability(it.id, !it.available); load(); }
     catch (e) { toast.error(e.message); }
   };
 

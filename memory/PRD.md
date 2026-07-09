@@ -16,6 +16,10 @@ Build a professional, reactive React (no TypeScript) frontend for an already-bui
 4. **Cashier** — sees pending bills, generates bill (tax %, discount), records payment (CASH/CARD/UPI/OTHER).
 
 ## What's Been Implemented — Feb 2026
+- **Admin status manager (Feb 2026)**: Removed inline per-row toggle buttons from Staff and Table Roster pages. Added a "Manage status" button (with `Power` icon) to the left of the "Add" button on each. Opens `StatusManagerModal` — a shared component with an animated sliding pill toggle at the top (LEFT = live/green with `translate-x-0`, RIGHT = retired/red with `translate-x-full`). Each side lists the rows for that state with checkboxes and search; the footer button ("Deactivate/Retire selected" on the green side, "Activate/Reactivate selected" on the red side) opens `PinModal` and calls the correct endpoint:
+  - Staff: `POST /api/admin/staff/activate` / `deactivate`, body `{ pin, staffIds:[…] }`
+  - Tables: `POST /api/admin/tables/reactivate` / `retire`, body `{ pin, tableIds:[…] }`
+- **Menu item availability fix (Feb 2026)**: Per-row availability toggle on menu items now calls `PATCH /api/admin/menu/items/{itemId}/availability` `{ available }` (no PIN, intentional one-click flip). Categories left untouched — no active/inactive concept in the backend.
 - **Admin bulk create + PIN gate (Feb 2026)**: All admin-side "Add" actions (Staff, Tables, Categories, Menu Items) now open a shared `BulkCreateModal` that accepts a variable-length list of drafts and requires a fresh admin PIN via `PinModal` before submission. Payload shape matches the updated backend API exactly (`{ pin, staff: [] }`, `{ pin, tables: [] }`, `{ pin, categories: [] }`, `{ pin, items: [] }`). Single-entity Edit modals remain unchanged.
 
 ## What's Been Implemented — Jan 2026
