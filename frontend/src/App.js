@@ -10,6 +10,10 @@ import WaiterTablesPage from "./views/WaiterTablesPage";
 import KitchenDashboard from "./views/KitchenDashboard";
 import CashierDashboard from "./views/CashierDashboard";
 import CashierTablesPage from "./views/CashierTablesPage";
+import MyAccount from "./views/MyAccount";
+import AdminModeSelect from "./views/AdminModeSelect";
+import AdminOverview from "./views/AdminOverview";
+import AdminOperate from "./views/AdminOperate";
 import DebugPanel from "./components/DebugPanel";
 import ProtectedStaffRoute from "./components/ProtectedStaffRoute";
 
@@ -78,6 +82,42 @@ function App() {
           element={
             <ProtectedStaffRoute role="CASHIER">
               <CashierDashboard />
+            </ProtectedStaffRoute>
+          }
+        />
+
+        {/* Admin */}
+        <Route
+          path="/staff/admin/select"
+          element={
+            <ProtectedStaffRoute role="ADMIN">
+              <AdminModeSelect />
+            </ProtectedStaffRoute>
+          }
+        />
+        <Route
+          path="/staff/admin"
+          element={
+            <ProtectedStaffRoute role="ADMIN">
+              <AdminOverview />
+            </ProtectedStaffRoute>
+          }
+        />
+        <Route
+          path="/staff/admin/operate"
+          element={
+            <ProtectedStaffRoute role="ADMIN">
+              <AdminOperate />
+            </ProtectedStaffRoute>
+          }
+        />
+
+        {/* Universal My Account — any signed-in staff */}
+        <Route
+          path="/staff/account"
+          element={
+            <ProtectedStaffRoute>
+              <MyAccount />
             </ProtectedStaffRoute>
           }
         />

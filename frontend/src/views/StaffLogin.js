@@ -8,6 +8,7 @@ const ROLE_HOME = {
   WAITER: "/staff/waiter",
   KITCHEN: "/staff/kitchen",
   CASHIER: "/staff/cashier",
+  ADMIN: "/staff/admin/select",
 };
 
 export default function StaffLogin() {

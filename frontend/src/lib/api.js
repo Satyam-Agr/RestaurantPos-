@@ -33,7 +33,9 @@ api.interceptors.request.use((config) => {
     (url.includes("/waiter/") ||
       url.includes("/kitchen/") ||
       url.includes("/cashier/") ||
-      url.includes("/bills"))
+      url.includes("/bills") ||
+      url.includes("/admin/") ||
+      url.includes("/staff/me"))
   ) {
     config.headers.Authorization = `Bearer ${staffToken}`;
     logInfo("api", `→ auth: staff token attached (${url})`);
@@ -177,3 +179,71 @@ export const generateBill = (sessionId, body) =>
   api.post(`/api/bills/${sessionId}/generate`, body).then((r) => r.data);
 export const payBill = (billId, paymentMethod) =>
   api.patch(`/api/bills/${billId}/pay`, { paymentMethod }).then((r) => r.data);
+
+// ---------- Staff profile (universal) ----------
+export const getMyProfile = () => api.get("/api/staff/me").then((r) => r.data);
+export const updateMyProfile = (body) => api.patch("/api/staff/me", body).then((r) => r.data);
+export const changeMyPassword = (body) =>
+  api.patch("/api/staff/me/password", body).then((r) => r.data);
+
+// ---------- Admin ----------
+export const adminMe = () => api.get("/api/admin/me").then((r) => r.data);
+export const adminSetPin = (pin) =>
+  api.patch("/api/admin/me/pin", { pin }).then((r) => r.data);
+
+// Tables (admin variant + audit)
+export const adminTablesList = (params) =>
+  api.get("/api/admin/tables", { params }).then((r) => r.data);
+export const adminTableDetail = (tableId) =>
+  api.get(`/api/admin/tables/${tableId}`).then((r) => r.data);
+export const adminFreeSession = (tableId, pin) =>
+  api.post(`/api/admin/tables/${tableId}/free-session`, { pin }).then((r) => r.data);
+export const adminRevealParticipants = (tableId, pin) =>
+  api.post(`/api/admin/tables/${tableId}/reveal-participants`, { pin }).then((r) => r.data);
+export const adminOrderHistory = (orderId) =>
+  api.get(`/api/admin/orders/${orderId}/history`).then((r) => r.data);
+
+// Table roster
+export const adminTablesRoster = () =>
+  api.get("/api/admin/tables/roster").then((r) => r.data);
+export const adminCreateTable = (tableNumber) =>
+  api.post("/api/admin/tables", { tableNumber }).then((r) => r.data);
+export const adminUpdateTable = (tableId, body) =>
+  api.patch(`/api/admin/tables/${tableId}`, body).then((r) => r.data);
+
+// Staff
+export const adminStaffList = () => api.get("/api/admin/staff").then((r) => r.data);
+export const adminCreateStaff = (body) =>
+  api.post("/api/admin/staff", body).then((r) => r.data);
+export const adminUpdateStaff = (staffId, body) =>
+  api.patch(`/api/admin/staff/${staffId}`, body).then((r) => r.data);
+
+// Menu
+export const adminMenuCategories = () =>
+  api.get("/api/admin/menu/categories").then((r) => r.data);
+export const adminCreateCategory = (body) =>
+  api.post("/api/admin/menu/categories", body).then((r) => r.data);
+export const adminUpdateCategory = (id, body) =>
+  api.patch(`/api/admin/menu/categories/${id}`, body).then((r) => r.data);
+export const adminDeleteCategory = (id) =>
+  api.delete(`/api/admin/menu/categories/${id}`).then((r) => r.data);
+export const adminMenuItems = () =>
+  api.get("/api/admin/menu/items").then((r) => r.data);
+export const adminCreateItem = (body) =>
+  api.post("/api/admin/menu/items", body).then((r) => r.data);
+export const adminUpdateItem = (id, body) =>
+  api.patch(`/api/admin/menu/items/${id}`, body).then((r) => r.data);
+export const adminDeleteItem = (id) =>
+  api.delete(`/api/admin/menu/items/${id}`).then((r) => r.data);
+
+// Bills history
+export const adminBills = (params) =>
+  api.get("/api/admin/bills", { params }).then((r) => r.data);
+
+// Analytics
+export const adminRevenue = (params) =>
+  api.get("/api/admin/analytics/revenue", { params }).then((r) => r.data);
+export const adminTopItems = (params) =>
+  api.get("/api/admin/analytics/top-items", { params }).then((r) => r.data);
+export const adminTiming = (params) =>
+  api.get("/api/admin/analytics/timing", { params }).then((r) => r.data);

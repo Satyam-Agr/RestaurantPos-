@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, UtensilsCrossed } from "lucide-react";
+import { LogOut, UtensilsCrossed, UserCircle2 } from "lucide-react";
 
 export default function StaffShell({ title, subtitle, children, testId }) {
   const nav = useNavigate();
@@ -35,12 +35,20 @@ export default function StaffShell({ title, subtitle, children, testId }) {
               </div>
             )}
             <button
+              onClick={() => nav("/staff/account")}
+              data-testid="staff-account-btn"
+              className="flex items-center gap-1.5 text-sm text-ink2 hover:text-brand px-3 py-1.5 rounded-full hover:bg-brand/5 transition"
+            >
+              <UserCircle2 size={14} />
+              <span className="hidden sm:inline">Account</span>
+            </button>
+            <button
               onClick={logout}
               data-testid="staff-logout-btn"
               className="flex items-center gap-1.5 text-sm text-ink2 hover:text-destructive px-3 py-1.5 rounded-full hover:bg-destructive/10 transition"
             >
               <LogOut size={14} />
-              Sign out
+              <span className="hidden sm:inline">Sign out</span>
             </button>
           </div>
         </div>
