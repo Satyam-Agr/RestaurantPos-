@@ -12,6 +12,7 @@ import com.restro.backend.exception.ConflictException;
 import com.restro.backend.exception.NotFoundException;
 import com.restro.backend.repository.BillRepository;
 import com.restro.backend.repository.CustomerOrderRepository;
+import com.restro.backend.repository.RestaurantTableRepository;
 import com.restro.backend.repository.TableSessionRepository;
 import com.restro.backend.ws.OrderEventBroadcaster;
 import lombok.RequiredArgsConstructor;
@@ -34,10 +35,12 @@ public class BillService {
     private static final List<OrderStatus> EXCLUDED_FROM_BILLING = List.of(OrderStatus.CART, OrderStatus.CANCELLED);
 
     private final TableSessionRepository tableSessionRepository;
+    private final RestaurantTableRepository restaurantTableRepository;
     private final CustomerOrderRepository customerOrderRepository;
     private final BillRepository billRepository;
     private final OrderService orderService;
     private final SessionService sessionService;
+    private final TableOverviewService tableOverviewService;
     private final OrderMapper orderMapper;
     private final OrderEventBroadcaster broadcaster;
 
@@ -49,7 +52,22 @@ public class BillService {
         TableSession session = tableSessionRepository.findBySessionToken(sessionToken)
                 .filter(s -> s.getStatus() == SessionStatus.ACTIVE)
                 .orElseThrow(() -> new NotFoundException("Active session not found"));
+        transitionToBillRequested(session);
+        tableOverviewService.refreshAndBroadcast(session);
+    }
 
+    @Transactional
+    public void requestBillForTable(Long tableId) {
+        RestaurantTable table = restaurantTableRepository.findById(tableId)
+                .orElseThrow(() -> new NotFoundException("Table " + tableId + " not found"));
+        TableSession session = tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE)
+                .orElseThrow(() -> new NotFoundException("No active session for this table"));
+        transitionToBillRequested(session);
+        tableOverviewService.refreshAndBroadcast(session);
+    }
+
+    // Shared by the customer-facing bill-request flow and the cashier's generate-directly path.
+    void transitionToBillRequested(TableSession session) {
         if (customerOrderRepository.existsByTableSessionAndStatus(session, OrderStatus.BILL_REQUESTED)) {
             throw new ConflictException("The bill has already been requested for this table");
         }
@@ -100,12 +118,17 @@ public class BillService {
         }
 
         broadcaster.notifyCashier(new CashierNotice("BILL_REQUEST_REVERTED", session.getId(), session.getTable().getTableNumber(), null));
+        tableOverviewService.refreshAndBroadcast(session);
     }
 
     @Transactional
     public BillResponse generateBill(Long sessionId, GenerateBillRequest request) {
         TableSession session = tableSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new NotFoundException("Session " + sessionId + " not found"));
+
+        if (!customerOrderRepository.existsByTableSessionAndStatus(session, OrderStatus.BILL_REQUESTED)) {
+            transitionToBillRequested(session);
+        }
 
         List<CustomerOrder> billableOrders = customerOrderRepository.findAllByTableSessionAndStatusNotIn(session, EXCLUDED_FROM_BILLING);
         if (billableOrders.isEmpty()) {
@@ -152,6 +175,7 @@ public class BillService {
 
         BillResponse response = toResponse(bill);
         broadcaster.notifyCashier(new CashierNotice("BILL_GENERATED", session.getId(), session.getTable().getTableNumber(), response));
+        tableOverviewService.refreshAndBroadcast(session);
         return response;
     }
 
@@ -175,6 +199,7 @@ public class BillService {
 
         BillResponse response = toResponse(bill);
         broadcaster.notifyCashier(new CashierNotice("BILL_PAID", session.getId(), session.getTable().getTableNumber(), response));
+        tableOverviewService.refreshAndBroadcast(session);
         return response;
     }
 

@@ -1,12 +1,16 @@
 package com.restro.backend.service;
 
 import com.restro.backend.domain.*;
+import com.restro.backend.dto.OrderItemRequest;
 import com.restro.backend.dto.OrderResponse;
 import com.restro.backend.exception.ConflictException;
 import com.restro.backend.exception.NotFoundException;
 import com.restro.backend.repository.CustomerOrderRepository;
+import com.restro.backend.repository.MenuItemRepository;
 import com.restro.backend.repository.OrderItemRepository;
 import com.restro.backend.repository.OrderStatusEventRepository;
+import com.restro.backend.repository.RestaurantTableRepository;
+import com.restro.backend.repository.TableSessionRepository;
 import com.restro.backend.ws.OrderEventBroadcaster;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -22,6 +26,10 @@ public class OrderService {
     private final CustomerOrderRepository customerOrderRepository;
     private final OrderItemRepository orderItemRepository;
     private final OrderStatusEventRepository orderStatusEventRepository;
+    private final RestaurantTableRepository restaurantTableRepository;
+    private final TableSessionRepository tableSessionRepository;
+    private final MenuItemRepository menuItemRepository;
+    private final TableOverviewService tableOverviewService;
     private final OrderMapper orderMapper;
     private final OrderEventBroadcaster broadcaster;
 
@@ -54,6 +62,55 @@ public class OrderService {
         OrderResponse response = orderMapper.toResponse(order);
         broadcaster.notifyKitchen(response);
         broadcaster.notifyTable(order.getTableSession().getId(), response);
+        tableOverviewService.refreshAndBroadcast(order.getTableSession());
+        return response;
+    }
+
+    // A waiter taking a verbal/walk-in order on a customer's behalf. Unlike the customer cart flow, this
+    // skips CART -> PLACED -> confirm entirely: the order lands straight in CONFIRMED and goes straight to
+    // the kitchen, since the waiter entering it has already effectively confirmed it themselves.
+    @Transactional
+    public OrderResponse createStaffOrder(Long tableId, List<OrderItemRequest> itemRequests, StaffUser waiter) {
+        RestaurantTable table = restaurantTableRepository.findById(tableId)
+                .orElseThrow(() -> new NotFoundException("Table " + tableId + " not found"));
+        TableSession session = tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE)
+                .orElseThrow(() -> new NotFoundException("No active session for this table — start one first"));
+
+        if (customerOrderRepository.existsByTableSessionAndStatus(session, OrderStatus.BILL_REQUESTED)) {
+            throw new ConflictException("The bill has already been requested for this table — no further changes are allowed");
+        }
+
+        CustomerOrder order = CustomerOrder.builder()
+                .tableSession(session)
+                .status(OrderStatus.CONFIRMED)
+                .placedAt(Instant.now())
+                .confirmedBy(waiter)
+                .confirmedAt(Instant.now())
+                .build();
+
+        for (OrderItemRequest itemRequest : itemRequests) {
+            MenuItem menuItem = menuItemRepository.findById(itemRequest.menuItemId())
+                    .orElseThrow(() -> new NotFoundException("Menu item " + itemRequest.menuItemId() + " not found"));
+            if (!menuItem.isAvailable()) {
+                throw new ConflictException("Menu item '" + menuItem.getName() + "' is currently unavailable");
+            }
+            order.getItems().add(OrderItem.builder()
+                    .order(order)
+                    .menuItem(menuItem)
+                    .quantity(itemRequest.quantity())
+                    .unitPrice(menuItem.getPrice())
+                    .notes(itemRequest.notes())
+                    .itemStatus(ItemStatus.CONFIRMED)
+                    .build());
+        }
+
+        customerOrderRepository.save(order);
+        logEvent(order, null, OrderStatus.CONFIRMED, waiter);
+
+        OrderResponse response = orderMapper.toResponse(order);
+        broadcaster.notifyKitchen(response);
+        broadcaster.notifyTable(session.getId(), response);
+        tableOverviewService.refreshAndBroadcast(session);
         return response;
     }
 
@@ -83,6 +140,7 @@ public class OrderService {
             broadcaster.notifyWaiter(response);
         }
         broadcaster.notifyTable(order.getTableSession().getId(), response);
+        tableOverviewService.refreshAndBroadcast(order.getTableSession());
         return response;
     }
 

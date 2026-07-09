@@ -18,4 +18,5 @@ public interface CustomerOrderRepository extends JpaRepository<CustomerOrder, Lo
     List<CustomerOrder> findAllByTableSessionAndStatus(TableSession tableSession, OrderStatus status);
     boolean existsByTableSessionAndStatus(TableSession tableSession, OrderStatus status);
     boolean existsByTableSessionAndStatusIn(TableSession tableSession, List<OrderStatus> statuses);
+    int countByTableSessionAndStatus(TableSession tableSession, OrderStatus status);
 }

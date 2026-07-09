@@ -23,6 +23,7 @@ public class CartService {
     private final MenuItemRepository menuItemRepository;
     private final SessionService sessionService;
     private final OrderService orderService;
+    private final TableOverviewService tableOverviewService;
     private final OrderMapper orderMapper;
     private final OrderEventBroadcaster broadcaster;
 
@@ -115,6 +116,7 @@ public class CartService {
                 .build();
         freshCart = customerOrderRepository.save(freshCart);
         broadcaster.notifyCart(session.getId(), orderMapper.toResponse(freshCart));
+        tableOverviewService.refreshAndBroadcast(session);
 
         return placedResponse;
     }

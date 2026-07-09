@@ -15,16 +15,18 @@ WebSocket endpoint: `http://localhost:8080/ws` (SockJS + STOMP)
 - **The session creator can't abandon an in-progress order**: if the phone number that *created* the session (not a joiner — joiners can always leave freely) tries to leave while any order in that session is at `PLACED` or later (submitted but not yet paid/cancelled), `leave` 409s with a message explaining why. This is deliberate — someone has to stay accountable for a table with food already in motion. Once every order in the session is either not-yet-submitted (`CART`), `CANCELLED`, or the bill has been generated (order rows are deleted at that point), the creator is free to leave like anyone else.
 - **Auto-close on an empty, order-free table**: after any `leave` call, if the session's participant roster has hit zero (everyone, including the creator, has left) *and* there's no order at `PLACED` or later, the session closes and the table frees automatically — no cashier action needed. This mainly matters for a table that was created and then abandoned before anything was actually ordered. There's no dedicated notification for this — poll `GET /api/customers/me/session` (404→204 transition) or `GET /api/sessions/status/{qrToken}` to notice it happened.
 - **Staff** (waiter/kitchen/cashier/admin): JWT bearer tokens obtained via `POST /api/auth/login`. Send as `Authorization: Bearer <token>` on every staff-role request.
+- **Walk-in tables opened by a waiter**: a waiter can open a table's order list directly (`POST /api/waiter/tables/{tableId}/session`) for a customer who never touches their phone at all — no customer login involved. This is entirely transparent to the customer-facing app: if that table's customer *does* eventually scan the QR code, `GET /api/sessions/status/{qrToken}` still reports `activeSessionExists: false` and `POST /api/sessions/create/{qrToken}` still behaves like a normal create — under the hood it silently attaches that customer to the session the waiter already opened (same `sessionToken`, same PIN) instead of starting a fresh one, so the customer immediately sees whatever the waiter already entered via `GET /api/sessions/{sessionToken}/orders`. No frontend changes needed for this — it's a backend-only behavior, mentioned here so it's not surprising if `create` ever returns order history that "shouldn't" exist yet. Once a session's been claimed this way, everything (join, leave, creator-lock, etc.) behaves exactly like any other customer-created session.
 
 ---
 
 ## Enums (exact values, case-sensitive)
 
 ```
-OrderStatus:   CART, PLACED, CONFIRMED, PREPARING, READY, SERVED, BILL_REQUESTED, PAID, CANCELLED
-ItemStatus:    PENDING, CONFIRMED, PREPARING, READY, SERVED, CANCELLED
-PaymentMethod: CASH, CARD, UPI, OTHER
-StaffRole:     WAITER, KITCHEN, CASHIER, ADMIN
+OrderStatus:         CART, PLACED, CONFIRMED, PREPARING, READY, SERVED, BILL_REQUESTED, PAID, CANCELLED
+ItemStatus:          PENDING, CONFIRMED, PREPARING, READY, SERVED, CANCELLED
+PaymentMethod:       CASH, CARD, UPI, OTHER
+StaffRole:           WAITER, KITCHEN, CASHIER, ADMIN
+TableOverviewStatus: AVAILABLE, AWAITING_ORDER, NEEDS_CONFIRMATION, PREPARING, READY_TO_SERVE, SERVED_AWAITING_BILL, BILL_REQUESTED
 ```
 
 `OrderStatus.CART` is the shared draft basket before submission — it never appears in any staff-facing list (waiter/kitchen queries only ever return `PLACED`/`CONFIRMED`/etc.).
@@ -121,6 +123,47 @@ An item with `itemStatus: "CANCELLED"` stays in the list (soft-removed, e.g. by 
 { "customerToken": "eyJ...", "customerId": 1, "phoneNumber": "9876543210" }
 ```
 
+### `TableSummaryResponse` (the table-grid list view — same shape for waiter and cashier, one tile per table)
+```json
+{
+  "tableId": 1,
+  "tableNumber": "T1",
+  "tableStatus": "OCCUPIED",
+  "overviewStatus": "NEEDS_CONFIRMATION",
+  "sessionId": 1,
+  "openedAt": "2026-07-08T11:11:11.637435Z",
+  "participantCount": 2,
+  "ordersAwaitingConfirmation": 1,
+  "itemsInKitchen": 0,
+  "itemsReadyToServe": 0,
+  "billRequested": false
+}
+```
+`overviewStatus` is a server-computed priority summary of "what does this table need right now" — use it to color/badge the tile, don't try to infer urgency from the raw counts yourself. Priority order (first match wins): `NEEDS_CONFIRMATION` (an order is `PLACED`, waiting on a waiter — most urgent) → `READY_TO_SERVE` (an item is `READY`, food's getting cold) → `BILL_REQUESTED` → `PREPARING` (kitchen has it, nothing for staff to do) → `AWAITING_ORDER` (session open, nothing submitted yet) → `SERVED_AWAITING_BILL` (everything served, no bill requested yet) → `AVAILABLE` (no active session — every session-dependent field above is `null`).
+
+### `WaiterTableDetailResponse` (waiter's drill-down for one table)
+```json
+{
+  "tableId": 1, "tableNumber": "T1", "tableStatus": "OCCUPIED", "overviewStatus": "NEEDS_CONFIRMATION",
+  "sessionId": 1, "pin": "0233", "openedAt": "2026-07-08T11:11:11.637435Z",
+  "participantCount": 1, "billRequested": false,
+  "orders": [ /* OrderResponse[], every submitted order for this session — same shape as GET /api/sessions/{sessionToken}/orders */ ]
+}
+```
+`orders` carries real `orderId`/`itemId` values — use them to call the *existing* confirm/serve/edit endpoints directly from this view (e.g. tap an item in the drill-down → `PATCH /api/waiter/order-items/{itemId}/serve`). This is read-only additive access, not a new write surface.
+
+### `CashierTableDetailResponse` (cashier's drill-down — same itemized order detail as the waiter's, still no `pin`, still no participant phone numbers)
+```json
+{
+  "tableId": 1, "tableNumber": "T1", "tableStatus": "OCCUPIED", "overviewStatus": "BILL_REQUESTED",
+  "sessionId": 1, "openedAt": "2026-07-08T11:11:11.637435Z",
+  "participantCount": 1, "billRequested": true,
+  "orderCount": 1, "estimatedTotal": 220.00,
+  "orders": [ /* OrderResponse[], identical shape/content to WaiterTableDetailResponse.orders */ ]
+}
+```
+`estimatedTotal` is a pre-tax subtotal across all non-cancelled items in the session (tax/discount aren't known until `generate` is actually called) — show it as "~₹220 (before tax)", not as a final total. `orders` carries the same real item-level detail the waiter sees (names, quantities, statuses) — the only things still withheld from the cashier are the session `pin` and participant phone numbers/names (`participantCount` stays headcount-only).
+
 ### `ApiErrorResponse` (shape of every non-2xx response body)
 ```json
 { "timestamp": "2026-07-06T19:08:47.079645300Z", "status": 404, "message": "No table found for this QR code" }
@@ -169,6 +212,11 @@ Always parse and surface `message` on error — don't swallow it.
 
 | Method | Path | Body | Returns | Notes |
 |---|---|---|---|---|
+| GET | `/api/waiter/tables` | — | `TableSummaryResponse[]` | The full table grid, one tile per table (including tables with no active session — `overviewStatus: "AVAILABLE"`, every session field `null`). This is the new table-overview page's main list |
+| GET | `/api/waiter/tables/{tableId}` | — | `WaiterTableDetailResponse` | Drill-down for one table — full order/item detail. `{tableId}` is the numeric table id, not `tableNumber` |
+| POST | `/api/waiter/tables/{tableId}/request-bill` | — | 200 empty body | Same effect as the customer's `POST /api/orders/bill-request/{sessionToken}`, just keyed by `tableId` (the waiter doesn't have the customer's `sessionToken`). Same 409s apply ("already requested" / "must be served first") |
+| POST | `/api/waiter/tables/{tableId}/session` | — | `SessionResponse` | Opens a fresh order list for a table with no active session — for walk-in customers who never touch a phone. Same shape as a customer's create/join response (`sessionId`/`sessionToken`/`pin`/`qrToken`). 409 if the table already has an active session. See the walk-in note in Authentication model above — if the table's customer later scans the QR, `create` transparently attaches them to *this same* session instead of conflicting with it |
+| POST | `/api/waiter/tables/{tableId}/orders` | `{ "items": [ { "menuItemId": 1, "quantity": 2, "notes": "less spicy" } ] }` | `OrderResponse` | The waiter entering a verbal/walk-in order directly. One call places a whole round — `items` is a list, same per-item shape as `POST /api/cart/{sessionToken}/items`. Unlike the customer cart flow, this **skips `CART`/`PLACED`/confirm entirely**: the returned order is already `status: "CONFIRMED"` with every item `itemStatus: "CONFIRMED"`, and it's already visible to the kitchen — no separate confirm call needed, ever, for orders placed this way. 404 if the table has no active session (open one first via the endpoint above). 409 if the bill's already been requested for this table (same lockout as the customer cart). 404/409 per item if a `menuItemId` doesn't exist / isn't available |
 | GET | `/api/waiter/orders/pending` | — | `OrderResponse[]` | Orders with status `PLACED`, awaiting confirmation |
 | GET | `/api/waiter/orders/ready-to-serve` | — | `OrderResponse[]` | Orders with status `READY` |
 | PATCH | `/api/waiter/orders/{orderId}/confirm` | — | `OrderResponse` | `PLACED` → `CONFIRMED`, sends to kitchen |
@@ -187,10 +235,12 @@ Always parse and surface `message` on error — don't swallow it.
 
 | Method | Path | Body | Returns | Notes |
 |---|---|---|---|---|
+| GET | `/api/cashier/tables` | — | `TableSummaryResponse[]` | Same table grid as the waiter's, identical shape — the cashier's overview page main list |
+| GET | `/api/cashier/tables/{tableId}` | — | `CashierTableDetailResponse` | Drill-down for one table — summary + running subtotal only, **no** order items, **no** participant phone numbers. `{tableId}` is the numeric table id, not `tableNumber` |
 | GET | `/api/bills/requested` | — | `BillRequestSummary[]` | Sessions that have asked for the bill (order status `BILL_REQUESTED`) but don't have a generated `Bill` yet — this is the queue to work from before calling `generate` |
 | PATCH | `/api/bills/{sessionId}/revert` | — | 200 empty body | Undoes a bill request: every `BILL_REQUESTED` order in that session goes back to `SERVED` (the only state it could have come from). For "customer pressed the button by mistake" or "wants to add one more item" — the cart is independent of billing state, so a new round can just be added normally afterward. 409 if nothing is pending for that session. Pushes the reverted order(s) to `/topic/table/{sessionId}` same as any other status change |
 | GET | `/api/bills/pending` | — | `BillResponse[]` | Bills that have been generated but not yet paid |
-| POST | `/api/bills/{sessionId}/generate` | `{ "taxRatePercent": 5, "discount": 0 }` (**both required**) | `BillResponse` | `{sessionId}` here is the numeric `sessionId`, not `sessionToken`. 400 if either field is missing/null. **One-shot and final**: this call snapshots every item onto the bill (see `BillResponse.items` above), then permanently deletes the session's order/item data — there is nothing left to recompute from, so calling `generate` again for the same session 409s ("already generated"). Whether the table frees up **now** or only once paid is a server-side config toggle (`app.billing.free-table-on-generate`) — check with whoever's running the backend which mode is active |
+| POST | `/api/bills/{sessionId}/generate` | `{ "taxRatePercent": 5, "discount": 0 }` (**both required**) | `BillResponse` | `{sessionId}` here is the numeric `sessionId`, not `sessionToken`. 400 if either field is missing/null. **Works from any state where every order is `SERVED` or later** — you do **not** need to call bill-request first: if the session isn't already `BILL_REQUESTED`, `generate` transitions it there automatically before generating, in one call (still validates every order is actually `SERVED` — 409 "All orders must be served before requesting the bill" if not). This is the cashier's "generate directly" shortcut from the table-overview page — internally it's still request-then-generate, just not two separate clicks. **One-shot and final**: this call snapshots every item onto the bill (see `BillResponse.items` above), then permanently deletes the session's order/item data — there is nothing left to recompute from, so calling `generate` again for the same session 409s ("already generated"). Whether the table frees up **now** or only once paid is a server-side config toggle (`app.billing.free-table-on-generate`) — check with whoever's running the backend which mode is active |
 | PATCH | `/api/bills/{billId}/pay` | `{ "paymentMethod": "CARD" }` | `BillResponse` | Records payment. If the table wasn't already freed at generate time, this is where the session closes and the table becomes `AVAILABLE` |
 
 ---
@@ -206,8 +256,9 @@ Connect: `new SockJS('http://localhost:8080/ws')` wrapped in a STOMP client (e.g
 | `/topic/cashier` | `CashierNotice` — `{ event: "BILL_REQUESTED"\|"BILL_REQUEST_REVERTED"\|"BILL_GENERATED"\|"BILL_PAID", tableSessionId, tableNumber, bill: BillResponse\|null }` | Cashier dashboard | Bill requested / reverted / generated / paid. `bill` is only non-null for the generated/paid events |
 | `/topic/table/{sessionId}` | `OrderResponse` | Customer app (this specific session) | Any status change on one of this session's orders — waiter confirms, kitchen progresses, waiter edits a still-`PLACED` order, cashier reverts a bill request. Stops firing once the bill is generated (nothing left to push status updates about) — the frontend should treat this as the natural end of a visit, not a dropped connection |
 | `/topic/cart/{sessionId}` | `OrderResponse` (status `CART`) | Customer app (this specific session) | Any participant adds/edits/removes a cart item, or a fresh cart opens after submit |
+| `/topic/tables` | `TableSummaryResponse` | Waiter/cashier table-overview page | **One table's** summary changed — fires on session create/join/leave, cart submit, order confirm, item status change (kitchen progress, waiter serve), and any bill-request/generate/revert/pay. Not scoped per table — every connected waiter/cashier screen subscribes to this single shared topic and swaps out just the one tile matching the incoming `tableId`. This is a single global channel, unlike the other topics above which are per-session |
 
-`{sessionId}` in the topic path is the **numeric** `sessionId` field from `SessionResponse`, not the `sessionToken` string.
+`{sessionId}` in the topic path is the **numeric** `sessionId` field from `SessionResponse`, not the `sessionToken` string. `/topic/tables` has no `{sessionId}`/`{tableId}` in its path — it's one topic for the whole restaurant, and each message payload carries its own `tableId` for the client to match against.
 
 **Reliability requirement**: a subscription does not survive a dropped connection (phone screen lock, backgrounded tab, network blip), and reconnecting does not replay missed messages. Treat WS as a live-update layer on top of REST as the source of truth, not the only source of truth: fetch current state via REST on mount and on every WS reconnect (STOMP's `reconnectDelay` fires an `onConnect` callback on every reconnect, not just the first) and re-subscribe there too, and also reconcile on the browser's `visibilitychange`/`online` events so a backgrounded tab or dropped connection never leaves the UI stuck on stale data.
 

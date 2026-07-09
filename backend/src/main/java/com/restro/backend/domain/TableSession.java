@@ -30,8 +30,10 @@ public class TableSession {
     @Column(name = "pin", nullable = false, length = 4)
     private String pin;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "created_by_customer_id", nullable = false)
+    // Null for a walk-in session the waiter opened directly — see SessionService.createStaffSession.
+    // The first customer to scan the table's QR "claims" it (SessionService.createSession), becoming the creator.
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "created_by_customer_id", nullable = true)
     private Customer createdByCustomer;
 
     @Enumerated(EnumType.STRING)

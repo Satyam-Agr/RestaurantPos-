@@ -36,13 +36,18 @@ public class SessionService {
     private final CustomerOrderRepository customerOrderRepository;
     private final CustomerRepository customerRepository;
     private final SessionParticipantRepository sessionParticipantRepository;
+    private final TableOverviewService tableOverviewService;
     private final OrderMapper orderMapper;
 
     @Transactional(readOnly = true)
     public SessionStatusResponse getStatus(String qrToken) {
         RestaurantTable table = restaurantTableRepository.findByQrToken(qrToken)
                 .orElseThrow(() -> new NotFoundException("No table found for this QR code"));
-        boolean activeExists = tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE).isPresent();
+        // A waiter-opened, not-yet-claimed session (createdByCustomer == null) must look like "no session"
+        // here — the customer app should offer Create, not Join, for a walk-in table nobody's claimed yet.
+        boolean activeExists = tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE)
+                .map(s -> s.getCreatedByCustomer() != null)
+                .orElse(false);
         return new SessionStatusResponse(table.getTableNumber(), activeExists);
     }
 
@@ -51,13 +56,18 @@ public class SessionService {
         RestaurantTable table = restaurantTableRepository.findByQrToken(qrToken)
                 .orElseThrow(() -> new NotFoundException("No table found for this QR code"));
 
-        if (tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE).isPresent()) {
+        Optional<TableSession> existing = tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE);
+        if (existing.isPresent() && existing.get().getCreatedByCustomer() != null) {
             throw new ConflictException("An order list already exists for this table. Join it instead.");
         }
 
         Customer customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new NotFoundException("Customer not found"));
         requireNoOtherActiveSession(customer);
+
+        if (existing.isPresent()) {
+            return claimStaffSession(existing.get(), customer);
+        }
 
         table.setStatus(TableStatus.OCCUPIED);
         restaurantTableRepository.save(table);
@@ -83,6 +93,54 @@ public class SessionService {
                 .status(OrderStatus.CART)
                 .build();
         customerOrderRepository.save(cart);
+        tableOverviewService.refreshAndBroadcast(session);
+
+        return toSessionResponse(session);
+    }
+
+    // A waiter opened this session for a walk-in table (no customer yet). The first customer to scan the
+    // QR and hit "create" takes it over transparently — same sessionToken, same PIN, same order history.
+    private SessionResponse claimStaffSession(TableSession session, Customer customer) {
+        session.setCreatedByCustomer(customer);
+        tableSessionRepository.save(session);
+
+        sessionParticipantRepository.save(SessionParticipant.builder()
+                .tableSession(session)
+                .customer(customer)
+                .joinedAt(Instant.now())
+                .build());
+
+        tableOverviewService.refreshAndBroadcast(session);
+        return toSessionResponse(session);
+    }
+
+    @Transactional
+    public SessionResponse createStaffSession(Long tableId) {
+        RestaurantTable table = restaurantTableRepository.findById(tableId)
+                .orElseThrow(() -> new NotFoundException("Table " + tableId + " not found"));
+
+        if (tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE).isPresent()) {
+            throw new ConflictException("An order list already exists for this table.");
+        }
+
+        table.setStatus(TableStatus.OCCUPIED);
+        restaurantTableRepository.save(table);
+
+        TableSession session = TableSession.builder()
+                .table(table)
+                .sessionToken(UUID.randomUUID().toString())
+                .pin(generatePin())
+                .status(SessionStatus.ACTIVE)
+                .openedAt(Instant.now())
+                .build();
+        session = tableSessionRepository.save(session);
+
+        CustomerOrder cart = CustomerOrder.builder()
+                .tableSession(session)
+                .status(OrderStatus.CART)
+                .build();
+        customerOrderRepository.save(cart);
+        tableOverviewService.refreshAndBroadcast(session);
 
         return toSessionResponse(session);
     }
@@ -115,6 +173,7 @@ public class SessionService {
                     .build());
         }
 
+        tableOverviewService.refreshAndBroadcast(session);
         return toSessionResponse(session);
     }
 
@@ -135,7 +194,7 @@ public class SessionService {
                 .orElseThrow(() -> new ConflictException("No active session to leave"));
 
         TableSession session = participant.getTableSession();
-        boolean isCreator = session.getCreatedByCustomer().getId().equals(customerId);
+        boolean isCreator = session.getCreatedByCustomer() != null && session.getCreatedByCustomer().getId().equals(customerId);
         boolean hasActiveOrder = customerOrderRepository.existsByTableSessionAndStatusIn(session, ACTIVE_ORDER_STATUSES);
 
         if (isCreator && hasActiveOrder) {
@@ -149,6 +208,8 @@ public class SessionService {
         if (!hasActiveOrder && !sessionParticipantRepository.existsByTableSessionAndLeftAtIsNull(session)) {
             closeSessionAndFreeTable(session);
         }
+
+        tableOverviewService.refreshAndBroadcast(session);
     }
 
     @Transactional(readOnly = true)

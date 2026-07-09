@@ -2,7 +2,15 @@ package com.restro.backend.controller;
 
 import com.restro.backend.dto.OrderResponse;
 import com.restro.backend.dto.QuantityUpdateRequest;
+import com.restro.backend.dto.SessionResponse;
+import com.restro.backend.dto.StaffOrderRequest;
+import com.restro.backend.dto.TableSummaryResponse;
+import com.restro.backend.dto.WaiterTableDetailResponse;
 import com.restro.backend.security.StaffUserDetails;
+import com.restro.backend.service.BillService;
+import com.restro.backend.service.OrderService;
+import com.restro.backend.service.SessionService;
+import com.restro.backend.service.TableOverviewService;
 import com.restro.backend.service.WaiterService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +25,39 @@ import java.util.List;
 public class WaiterController {
 
     private final WaiterService waiterService;
+    private final TableOverviewService tableOverviewService;
+    private final BillService billService;
+    private final SessionService sessionService;
+    private final OrderService orderService;
+
+    @GetMapping("/tables")
+    public List<TableSummaryResponse> getTables() {
+        return tableOverviewService.getAllTableSummaries();
+    }
+
+    @GetMapping("/tables/{tableId}")
+    public WaiterTableDetailResponse getTable(@PathVariable Long tableId) {
+        return tableOverviewService.getWaiterDetail(tableId);
+    }
+
+    @PostMapping("/tables/{tableId}/request-bill")
+    public void requestBill(@PathVariable Long tableId) {
+        billService.requestBillForTable(tableId);
+    }
+
+    @PostMapping("/tables/{tableId}/session")
+    public SessionResponse startSession(@PathVariable Long tableId) {
+        return sessionService.createStaffSession(tableId);
+    }
+
+    @PostMapping("/tables/{tableId}/orders")
+    public OrderResponse placeOrder(
+            @PathVariable Long tableId,
+            @Valid @RequestBody StaffOrderRequest request,
+            @AuthenticationPrincipal StaffUserDetails principal
+    ) {
+        return orderService.createStaffOrder(tableId, request.items(), principal.staffUser());
+    }
 
     @GetMapping("/orders/pending")
     public List<OrderResponse> getPending() {

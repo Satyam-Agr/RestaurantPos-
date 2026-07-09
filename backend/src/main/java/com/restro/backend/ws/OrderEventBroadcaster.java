@@ -1,6 +1,7 @@
 package com.restro.backend.ws;
 
 import com.restro.backend.dto.OrderResponse;
+import com.restro.backend.dto.TableSummaryResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
@@ -10,6 +11,10 @@ import org.springframework.stereotype.Component;
 public class OrderEventBroadcaster {
 
     private final SimpMessagingTemplate messagingTemplate;
+
+    public void notifyTableOverview(TableSummaryResponse summary) {
+        messagingTemplate.convertAndSend("/topic/tables", summary);
+    }
 
     public void notifyWaiter(OrderResponse order) {
         messagingTemplate.convertAndSend("/topic/waiter", order);

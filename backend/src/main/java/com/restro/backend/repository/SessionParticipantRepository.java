@@ -12,4 +12,5 @@ public interface SessionParticipantRepository extends JpaRepository<SessionParti
     Optional<SessionParticipant> findByCustomerAndTableSession(Customer customer, TableSession tableSession);
     Optional<SessionParticipant> findByCustomerAndTableSession_StatusAndLeftAtIsNull(Customer customer, SessionStatus status);
     boolean existsByTableSessionAndLeftAtIsNull(TableSession tableSession);
+    int countByTableSessionAndLeftAtIsNull(TableSession tableSession);
 }
