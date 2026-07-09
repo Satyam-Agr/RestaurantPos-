@@ -16,6 +16,11 @@ Build a professional, reactive React (no TypeScript) frontend for an already-bui
 4. **Cashier** — sees pending bills, generates bill (tax %, discount), records payment (CASH/CARD/UPI/OTHER).
 
 ## What's Been Implemented — Feb 2026
+- **All admin edit modals are now PIN-gated (Feb 2026)**:
+  - **Staff edit** reduced to role-only. Name/username/email/contact/address are shown read-only. Save opens `PinModal` → `PATCH /api/admin/staff/{id}` `{ pin, role }`. Save is disabled when role is unchanged.
+  - **Table edit** = rename only, PIN-gated. → `PATCH /api/admin/tables/{id}` `{ pin, tableNumber }`.
+  - **Category edit** now includes a `sortOrder` numeric field. Sends only changed fields. → `PATCH /api/admin/menu/categories/{id}` `{ pin, name?, sortOrder? }`.
+  - **Item edit** removed the "Available" checkbox (that lives on the separate no-PIN toggle). Sends only changed fields. → `PATCH /api/admin/menu/items/{id}` `{ pin, categoryId?, name?, description?, price?, imageUrl? }`.
 - **Admin status manager (Feb 2026)**: Removed inline per-row toggle buttons from Staff and Table Roster pages. Added a "Manage status" button (with `Power` icon) to the left of the "Add" button on each. Opens `StatusManagerModal` — a shared component with an animated sliding pill toggle at the top (LEFT = live/green with `translate-x-0`, RIGHT = retired/red with `translate-x-full`). Each side lists the rows for that state with checkboxes and search; the footer button ("Deactivate/Retire selected" on the green side, "Activate/Reactivate selected" on the red side) opens `PinModal` and calls the correct endpoint:
   - Staff: `POST /api/admin/staff/activate` / `deactivate`, body `{ pin, staffIds:[…] }`
   - Tables: `POST /api/admin/tables/reactivate` / `retire`, body `{ pin, tableIds:[…] }`

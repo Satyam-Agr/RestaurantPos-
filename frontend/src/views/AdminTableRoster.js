@@ -8,10 +8,11 @@ import {
   adminReactivateTables,
 } from "../lib/api";
 import { toast } from "sonner";
-import { Plus, Edit2, Loader2, X, QrCode, Printer, Save, Power } from "lucide-react";
+import { Plus, Edit2, Loader2, X, QrCode, Printer, ShieldCheck, Power } from "lucide-react";
 import FilterTabs from "../components/FilterTabs";
 import BulkCreateModal, { BulkField } from "../components/BulkCreateModal";
 import StatusManagerModal from "../components/StatusManagerModal";
+import PinModal from "../components/PinModal";
 
 export default function AdminTableRoster() {
   const [rows, setRows] = useState([]);
@@ -141,24 +142,64 @@ export default function AdminTableRoster() {
 
 function EditModal({ row, onClose, onDone }) {
   const [n, setN] = useState(row.tableNumber || "");
-  const [busy, setBusy] = useState(false);
-  const submit = async (e) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await adminUpdateTable(row.id, { tableNumber: n });
-      toast.success("Renamed");
-      onDone();
-    } catch (e2) {
-      if (e2.status === 409) toast.error("Table number already in use.");
-      else toast.error(e2.message);
-    } finally { setBusy(false); }
-  };
-  return <div className="fixed inset-0 z-[60] bg-black/50 grid place-items-center p-4" onClick={onClose}><form onSubmit={submit} onClick={(e) => e.stopPropagation()} className="bg-surface rounded-3xl max-w-sm w-full p-6 shadow-lift">
-    <div className="flex justify-between mb-4"><h3 className="font-heading text-lg font-semibold">Rename Table</h3><button type="button" onClick={onClose}><X size={16} /></button></div>
-    <label className="block"><span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Table Number *</span><input value={n} onChange={(e) => setN(e.target.value)} autoFocus className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand" /></label>
-    <button type="submit" disabled={busy || !n} data-testid="table-save" className="mt-5 w-full flex items-center justify-center gap-2 rounded-full bg-brand hover:bg-brandHover text-white py-2.5 disabled:opacity-50">{busy ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}Save</button>
-  </form></div>;
+  const [askPin, setAskPin] = useState(false);
+  const trimmed = String(n).trim();
+  const canSave = trimmed.length > 0 && trimmed !== String(row.tableNumber);
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/50 grid place-items-center p-4" onClick={onClose}>
+        <div onClick={(e) => e.stopPropagation()} className="bg-surface rounded-3xl max-w-sm w-full p-6 shadow-lift">
+          <div className="flex justify-between mb-4">
+            <h3 className="font-heading text-lg font-semibold">Rename Table</h3>
+            <button type="button" onClick={onClose} className="text-ink2 hover:text-ink p-1"><X size={16} /></button>
+          </div>
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Table Number *</span>
+            <input
+              value={n}
+              onChange={(e) => setN(e.target.value)}
+              autoFocus
+              data-testid="table-edit-number"
+              className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setAskPin(true)}
+            disabled={!canSave}
+            data-testid="table-save"
+            className="mt-5 w-full flex items-center justify-center gap-2 rounded-full bg-brand hover:bg-brandHover text-white py-2.5 disabled:opacity-50"
+          >
+            <ShieldCheck size={14} />
+            Save
+          </button>
+        </div>
+      </div>
+
+      {askPin && (
+        <PinModal
+          title="Confirm rename"
+          description={`Rename Table ${row.tableNumber} → ${trimmed}. Enter your admin PIN.`}
+          onClose={() => setAskPin(false)}
+          onSubmit={async (pin) => {
+            try {
+              await adminUpdateTable(row.id, { pin, tableNumber: trimmed });
+            } catch (e2) {
+              if (e2.status === 409) {
+                // eslint-disable-next-line no-throw-literal
+                throw { ...e2, message: "Table number already in use." };
+              }
+              throw e2;
+            }
+            toast.success("Renamed");
+            setAskPin(false);
+            onDone();
+          }}
+        />
+      )}
+    </>
+  );
 }
 
 function QRModal({ row, onClose }) {

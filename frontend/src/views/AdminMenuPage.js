@@ -5,9 +5,10 @@ import {
   adminMenuItems, adminCreateItem, adminUpdateItem, adminDeleteItem, adminSetItemAvailability,
 } from "../lib/api";
 import { toast } from "sonner";
-import { Plus, Edit2, Trash2, Loader2, X, Save, ImageIcon, ToggleLeft, ToggleRight } from "lucide-react";
+import { Plus, Edit2, Trash2, X, ShieldCheck, ImageIcon, ToggleLeft, ToggleRight, Loader2 } from "lucide-react";
 import FilterTabs from "../components/FilterTabs";
 import BulkCreateModal, { BulkField } from "../components/BulkCreateModal";
+import PinModal from "../components/PinModal";
 
 export default function AdminMenuPage() {
   const [cats, setCats] = useState([]);
@@ -189,80 +190,158 @@ export default function AdminMenuPage() {
 
 function CategoryModal({ cat, onClose, onDone }) {
   const [name, setName] = useState(cat.name || "");
-  const [busy, setBusy] = useState(false);
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setBusy(true);
-    try {
-      await adminUpdateCategory(cat.id, { name });
-      toast.success("Updated");
-      onDone();
-    } catch (e2) { toast.error(e2.message); }
-    finally { setBusy(false); }
+  const [sortOrder, setSortOrder] = useState(
+    cat.sortOrder == null ? "" : String(cat.sortOrder)
+  );
+  const [askPin, setAskPin] = useState(false);
+
+  const diff = () => {
+    const d = {};
+    const trimmed = name.trim();
+    if (trimmed && trimmed !== cat.name) d.name = trimmed;
+    if (sortOrder !== "" && Number(sortOrder) !== cat.sortOrder) {
+      d.sortOrder = Number(sortOrder);
+    }
+    return d;
   };
-  return <ModalShell title="Edit Category" onClose={onClose}>
-    <form onSubmit={submit}>
-      <Field label="Category name" value={name} onChange={setName} required autoFocus />
-      <SubmitBar onClose={onClose} busy={busy} />
-    </form>
-  </ModalShell>;
+
+  const changes = diff();
+  const canSave = Object.keys(changes).length > 0 && (!("sortOrder" in changes) || Number.isFinite(changes.sortOrder));
+
+  return (
+    <>
+      <ModalShell title="Edit Category" onClose={onClose}>
+        <div className="space-y-3">
+          <Field label="Category name" value={name} onChange={setName} autoFocus />
+          <Field
+            label="Sort order"
+            type="number"
+            value={sortOrder}
+            onChange={setSortOrder}
+            placeholder="Lower shows first"
+          />
+          <p className="text-xs text-ink2 italic">
+            Both fields are optional — leave a field unchanged and it won&apos;t be sent.
+          </p>
+        </div>
+        <PinSubmitBar canSave={canSave} onClose={onClose} onClick={() => setAskPin(true)} />
+      </ModalShell>
+
+      {askPin && (
+        <PinModal
+          title="Confirm category update"
+          description={`Update category "${cat.name}". Enter your admin PIN.`}
+          onClose={() => setAskPin(false)}
+          onSubmit={async (pin) => {
+            await adminUpdateCategory(cat.id, { pin, ...changes });
+            toast.success("Updated");
+            setAskPin(false);
+            onDone();
+          }}
+        />
+      )}
+    </>
+  );
 }
 
 function ItemModal({ item, cats, onClose, onDone }) {
   const [f, setF] = useState({
-    name: item.name || "", price: item.price || "", description: item.description || "",
-    imageUrl: item.imageUrl || "", categoryId: item.categoryId || cats[0]?.id, available: item.available !== false,
+    name: item.name || "",
+    price: item.price != null ? String(item.price) : "",
+    description: item.description || "",
+    imageUrl: item.imageUrl || "",
+    categoryId: item.categoryId || cats[0]?.id,
   });
-  const [busy, setBusy] = useState(false);
+  const [askPin, setAskPin] = useState(false);
   const set = (k) => (v) => setF({ ...f, [k]: v });
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!f.name.trim() || !f.categoryId) return toast.error("Name and category required");
-    setBusy(true);
-    try {
-      await adminUpdateItem(item.id, { ...f, price: Number(f.price) });
-      toast.success("Updated");
-      onDone();
-    } catch (e2) { toast.error(e2.message); }
-    finally { setBusy(false); }
+
+  const diff = () => {
+    const d = {};
+    if (f.name.trim() !== (item.name || "")) d.name = f.name.trim();
+    if (f.description !== (item.description || "")) d.description = f.description;
+    if (f.imageUrl !== (item.imageUrl || "")) d.imageUrl = f.imageUrl;
+    if (Number(f.categoryId) !== item.categoryId) d.categoryId = Number(f.categoryId);
+    const priceNum = Number(f.price);
+    if (f.price !== "" && Number.isFinite(priceNum) && priceNum !== Number(item.price)) {
+      d.price = priceNum;
+    }
+    return d;
   };
-  return <ModalShell title="Edit Item" onClose={onClose}>
-    <form onSubmit={submit} className="space-y-3">
-      <Field label="Name" value={f.name} onChange={set("name")} required autoFocus />
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Price (₹)" type="number" value={f.price} onChange={set("price")} required />
-        <label className="block">
-          <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Category *</span>
-          <select value={f.categoryId} onChange={(e) => set("categoryId")(Number(e.target.value))} className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand">
-            {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </label>
-      </div>
-      <Field label="Description" value={f.description} onChange={set("description")} />
-      <Field label="Image URL" value={f.imageUrl} onChange={set("imageUrl")} />
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.available} onChange={(e) => set("available")(e.target.checked)} />Available</label>
-      <SubmitBar onClose={onClose} busy={busy} />
-    </form>
-  </ModalShell>;
+
+  const changes = diff();
+  const canSave = Object.keys(changes).length > 0 && f.name.trim() && f.categoryId;
+
+  return (
+    <>
+      <ModalShell title="Edit Item" onClose={onClose}>
+        <div className="space-y-3">
+          <Field label="Name" value={f.name} onChange={set("name")} autoFocus />
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Price (₹)" type="number" value={f.price} onChange={set("price")} />
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Category</span>
+              <select
+                value={f.categoryId}
+                onChange={(e) => set("categoryId")(Number(e.target.value))}
+                className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand"
+              >
+                {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+          </div>
+          <Field label="Description" value={f.description} onChange={set("description")} />
+          <Field label="Image URL" value={f.imageUrl} onChange={set("imageUrl")} />
+          <p className="text-xs text-ink2 italic">
+            Availability isn&apos;t edited here — toggle it directly from the item row.
+          </p>
+        </div>
+        <PinSubmitBar canSave={canSave} onClose={onClose} onClick={() => setAskPin(true)} />
+      </ModalShell>
+
+      {askPin && (
+        <PinModal
+          title="Confirm item update"
+          description={`Update "${item.name}". Enter your admin PIN.`}
+          onClose={() => setAskPin(false)}
+          onSubmit={async (pin) => {
+            await adminUpdateItem(item.id, { pin, ...changes });
+            toast.success("Updated");
+            setAskPin(false);
+            onDone();
+          }}
+        />
+      )}
+    </>
+  );
 }
 
 function ModalShell({ title, children, onClose }) {
   return (
     <div className="fixed inset-0 z-[60] bg-black/50 grid place-items-center p-4" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="bg-surface rounded-3xl max-w-md w-full p-6 shadow-lift max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4"><h3 className="font-heading text-lg font-semibold">{title}</h3><button onClick={onClose}><X size={16} /></button></div>
+        <div className="flex items-center justify-between mb-4"><h3 className="font-heading text-lg font-semibold">{title}</h3><button onClick={onClose} className="text-ink2 hover:text-ink p-1"><X size={16} /></button></div>
         {children}
       </div>
     </div>
   );
 }
-function Field({ label, value, onChange, type, required, autoFocus }) {
-  return <label className="block"><span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">{label} {required && <span className="text-destructive">*</span>}</span><input type={type || "text"} value={value} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand" /></label>;
+function Field({ label, value, onChange, type, required, autoFocus, placeholder }) {
+  return <label className="block"><span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">{label} {required && <span className="text-destructive">*</span>}</span><input type={type || "text"} value={value} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} placeholder={placeholder} className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand" /></label>;
 }
-function SubmitBar({ onClose, busy }) {
-  return <div className="mt-5 flex gap-2 justify-end">
-    <button type="button" onClick={onClose} className="rounded-full border border-bg2 px-4 py-2 text-sm">Cancel</button>
-    <button type="submit" disabled={busy} data-testid="modal-save" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-lift disabled:opacity-50">{busy ? <Loader2 className="animate-spin" size={12} /> : <Save size={12} />}Save</button>
-  </div>;
+function PinSubmitBar({ canSave, onClose, onClick }) {
+  return (
+    <div className="mt-5 flex gap-2 justify-end">
+      <button type="button" onClick={onClose} className="rounded-full border border-bg2 px-4 py-2 text-sm">Cancel</button>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={!canSave}
+        data-testid="modal-save"
+        className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-lift disabled:opacity-50"
+      >
+        <ShieldCheck size={12} />
+        Save
+      </button>
+    </div>
+  );
 }
