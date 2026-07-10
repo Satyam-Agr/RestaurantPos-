@@ -36,6 +36,7 @@ public class TableOverviewService {
     @Transactional(readOnly = true)
     public List<TableSummaryResponse> getAllTableSummaries() {
         return restaurantTableRepository.findAll().stream()
+                .filter(t -> !Boolean.TRUE.equals(t.getRetired()))
                 .map(this::toSummary)
                 .toList();
     }
@@ -71,6 +72,23 @@ public class TableOverviewService {
                 summary.tableId(), summary.tableNumber(), summary.tableStatus(), summary.overviewStatus(),
                 summary.sessionId(), summary.openedAt(), summary.participantCount(), summary.billRequested(),
                 orderCount, estimatedTotal, orders
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public AdminTableDetailResponse getAdminDetail(Long tableId) {
+        RestaurantTable table = requireTable(tableId);
+        Optional<TableSession> session = tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE);
+        TableSummaryResponse summary = toSummary(table, session);
+
+        String pin = session.map(TableSession::getPin).orElse(null);
+        BigDecimal estimatedTotal = session.map(this::calculateSubtotal).orElse(null);
+        List<OrderResponse> orders = fetchOrders(session);
+
+        return new AdminTableDetailResponse(
+                summary.tableId(), summary.tableNumber(), summary.tableStatus(), summary.overviewStatus(),
+                summary.sessionId(), pin, summary.openedAt(), summary.participantCount(), summary.billRequested(),
+                estimatedTotal, orders
         );
     }
 

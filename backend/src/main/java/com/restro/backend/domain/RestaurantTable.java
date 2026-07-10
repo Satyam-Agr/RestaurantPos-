@@ -28,4 +28,8 @@ public class RestaurantTable {
     @Column(nullable = false)
     @Builder.Default
     private TableStatus status = TableStatus.AVAILABLE;
+
+    // Boxed/nullable (not a primitive NOT NULL boolean) so adding this column to an existing, already-seeded
+    // table doesn't require a backfill default — null is treated as "not retired" everywhere it's read.
+    private Boolean retired;
 }

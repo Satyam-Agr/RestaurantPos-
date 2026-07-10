@@ -64,9 +64,13 @@ public class DataSeeder implements CommandLineRunner {
         if (staffUserRepository.count() > 0) {
             return;
         }
-        staffUserRepository.save(StaffUser.builder().name("Waiter One").username("waiter1").passwordHash(passwordEncoder.encode("password123")).role(StaffRole.WAITER).active(true).build());
-        staffUserRepository.save(StaffUser.builder().name("Kitchen One").username("kitchen1").passwordHash(passwordEncoder.encode("password123")).role(StaffRole.KITCHEN).active(true).build());
-        staffUserRepository.save(StaffUser.builder().name("Cashier One").username("cashier1").passwordHash(passwordEncoder.encode("password123")).role(StaffRole.CASHIER).active(true).build());
-        staffUserRepository.save(StaffUser.builder().name("Admin One").username("admin1").passwordHash(passwordEncoder.encode("password123")).role(StaffRole.ADMIN).active(true).build());
+        staffUserRepository.save(StaffUser.builder().name("Waiter One").username("waiter1").passwordHash(passwordEncoder.encode("password123")).role(StaffRole.WAITER).active(true)
+                .email("waiter1@restropos.example").contactNumber("9800000001").address("12 Staff Quarters, City").build());
+        staffUserRepository.save(StaffUser.builder().name("Kitchen One").username("kitchen1").passwordHash(passwordEncoder.encode("password123")).role(StaffRole.KITCHEN).active(true)
+                .email("kitchen1@restropos.example").contactNumber("9800000002").address("14 Staff Quarters, City").build());
+        staffUserRepository.save(StaffUser.builder().name("Cashier One").username("cashier1").passwordHash(passwordEncoder.encode("password123")).role(StaffRole.CASHIER).active(true)
+                .email("cashier1@restropos.example").contactNumber("9800000003").address("16 Staff Quarters, City").build());
+        staffUserRepository.save(StaffUser.builder().name("Admin One").username("admin1").passwordHash(passwordEncoder.encode("password123")).role(StaffRole.ADMIN).active(true)
+                .email("admin1@restropos.example").contactNumber("9800000004").address("1 Manager's House, City").build());
     }
 }

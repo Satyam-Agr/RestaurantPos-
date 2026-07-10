@@ -15,6 +15,8 @@ WebSocket endpoint: `http://localhost:8080/ws` (SockJS + STOMP)
 - **The session creator can't abandon an in-progress order**: if the phone number that *created* the session (not a joiner — joiners can always leave freely) tries to leave while any order in that session is at `PLACED` or later (submitted but not yet paid/cancelled), `leave` 409s with a message explaining why. This is deliberate — someone has to stay accountable for a table with food already in motion. Once every order in the session is either not-yet-submitted (`CART`), `CANCELLED`, or the bill has been generated (order rows are deleted at that point), the creator is free to leave like anyone else.
 - **Auto-close on an empty, order-free table**: after any `leave` call, if the session's participant roster has hit zero (everyone, including the creator, has left) *and* there's no order at `PLACED` or later, the session closes and the table frees automatically — no cashier action needed. This mainly matters for a table that was created and then abandoned before anything was actually ordered. There's no dedicated notification for this — poll `GET /api/customers/me/session` (404→204 transition) or `GET /api/sessions/status/{qrToken}` to notice it happened.
 - **Staff** (waiter/kitchen/cashier/admin): JWT bearer tokens obtained via `POST /api/auth/login`. Send as `Authorization: Bearer <token>` on every staff-role request.
+- **Admin can also operate as waiter or cashier**: an `ADMIN` token is authorized on `/api/waiter/**` and `/api/cashier/**`/`/api/bills/**` in addition to `/api/admin/**` — deliberately **not** `/api/kitchen/**`. Every action taken this way is attributed to the admin's own staff account (`confirmedBy`, `changedBy`, etc.), exactly as if a waiter/cashier had done it themselves. No separate admin-flavored versions of those endpoints exist — reuse them as-is.
+- **Admin security PIN**: separate from the login password, only relevant for `ADMIN` accounts, gates two sensitive actions (`free-session`, `reveal-participants` — see the Admin section below). A fresh admin account (including seeded `admin1`) has no PIN set — those two endpoints 409 with "Set your security PIN first" until `PATCH /api/admin/me/pin` is called. The PIN is re-checked on every single sensitive call (sent in that call's own request body) — there's no elevated "unlocked" session state to manage on the frontend.
 - **Walk-in tables opened by a waiter**: a waiter can open a table's order list directly (`POST /api/waiter/tables/{tableId}/session`) for a customer who never touches their phone at all — no customer login involved. This is entirely transparent to the customer-facing app: if that table's customer *does* eventually scan the QR code, `GET /api/sessions/status/{qrToken}` still reports `activeSessionExists: false` and `POST /api/sessions/create/{qrToken}` still behaves like a normal create — under the hood it silently attaches that customer to the session the waiter already opened (same `sessionToken`, same PIN) instead of starting a fresh one, so the customer immediately sees whatever the waiter already entered via `GET /api/sessions/{sessionToken}/orders`. No frontend changes needed for this — it's a backend-only behavior, mentioned here so it's not surprising if `create` ever returns order history that "shouldn't" exist yet. Once a session's been claimed this way, everything (join, leave, creator-lock, etc.) behaves exactly like any other customer-created session.
 
 ---
@@ -67,6 +69,7 @@ An item with `itemStatus: "CANCELLED"` stays in the list (soft-removed, e.g. by 
 {
   "id": 1,
   "tableSessionId": 1,
+  "tableNumber": "T1",
   "subtotal": 660.00,
   "tax": 33.00,
   "discount": 0.00,
@@ -236,12 +239,92 @@ Always parse and surface `message` on error — don't swallow it.
 | Method | Path | Body | Returns | Notes |
 |---|---|---|---|---|
 | GET | `/api/cashier/tables` | — | `TableSummaryResponse[]` | Same table grid as the waiter's, identical shape — the cashier's overview page main list |
-| GET | `/api/cashier/tables/{tableId}` | — | `CashierTableDetailResponse` | Drill-down for one table — summary + running subtotal only, **no** order items, **no** participant phone numbers. `{tableId}` is the numeric table id, not `tableNumber` |
+| GET | `/api/cashier/tables/{tableId}` | — | `CashierTableDetailResponse` | Drill-down for one table — itemized orders + running subtotal, same order detail the waiter sees. Still **no** `pin`, still **no** participant phone numbers (`participantCount` stays headcount-only). `{tableId}` is the numeric table id, not `tableNumber` |
 | GET | `/api/bills/requested` | — | `BillRequestSummary[]` | Sessions that have asked for the bill (order status `BILL_REQUESTED`) but don't have a generated `Bill` yet — this is the queue to work from before calling `generate` |
 | PATCH | `/api/bills/{sessionId}/revert` | — | 200 empty body | Undoes a bill request: every `BILL_REQUESTED` order in that session goes back to `SERVED` (the only state it could have come from). For "customer pressed the button by mistake" or "wants to add one more item" — the cart is independent of billing state, so a new round can just be added normally afterward. 409 if nothing is pending for that session. Pushes the reverted order(s) to `/topic/table/{sessionId}` same as any other status change |
 | GET | `/api/bills/pending` | — | `BillResponse[]` | Bills that have been generated but not yet paid |
 | POST | `/api/bills/{sessionId}/generate` | `{ "taxRatePercent": 5, "discount": 0 }` (**both required**) | `BillResponse` | `{sessionId}` here is the numeric `sessionId`, not `sessionToken`. 400 if either field is missing/null. **Works from any state where every order is `SERVED` or later** — you do **not** need to call bill-request first: if the session isn't already `BILL_REQUESTED`, `generate` transitions it there automatically before generating, in one call (still validates every order is actually `SERVED` — 409 "All orders must be served before requesting the bill" if not). This is the cashier's "generate directly" shortcut from the table-overview page — internally it's still request-then-generate, just not two separate clicks. **One-shot and final**: this call snapshots every item onto the bill (see `BillResponse.items` above), then permanently deletes the session's order/item data — there is nothing left to recompute from, so calling `generate` again for the same session 409s ("already generated"). Whether the table frees up **now** or only once paid is a server-side config toggle (`app.billing.free-table-on-generate`) — check with whoever's running the backend which mode is active |
 | PATCH | `/api/bills/{billId}/pay` | `{ "paymentMethod": "CARD" }` | `BillResponse` | Records payment. If the table wasn't already freed at generate time, this is where the session closes and the table becomes `AVAILABLE` |
+
+### Admin (`Authorization: Bearer <token>`, role `ADMIN`)
+
+Admin also has full access to every Waiter and Cashier endpoint above (see the note in Authentication model) — not repeated here.
+
+**PIN-gating rule**: every admin write action below requires the security PIN (`pin` in the request body), **except** `PATCH /api/admin/menu/items/{id}/availability` — the one deliberate exemption, since toggling an item on/off is frequent, low-risk, and fully reversible. Everything else — creating, editing, deleting, or bulk-changing status on staff/menu/tables — needs it. Create/delete/bulk-status-change actions accept a **list** and a single `pin` covers the whole batch, specifically so bulk work (adding 10 menu items, retiring 3 tables) doesn't mean re-entering the PIN 10 times. Detail edits (rename one table, change one staff member's role, edit one item's price) stay single-item calls, still PIN-gated per call. Every batch action is **atomic all-or-nothing** — if any entry in the list fails validation, nothing in that call is written, and the error names every offending entry, not just the first one hit.
+
+**Self-service:**
+
+| Method | Path | Body | Returns | Notes |
+|---|---|---|---|---|
+| GET | `/api/admin/me` | — | `AdminMeResponse` — `{ staffId, name, username, role, pinSet }` | `pinSet` tells the frontend whether to show "Set PIN" or "Change PIN" |
+| PATCH | `/api/admin/me/pin` | `{ "currentPassword": "...", "newPin": "1234" }` | 200 empty body | Sets or changes the admin's security PIN. `newPin` must be 4–6 digits. 401 if `currentPassword` is wrong |
+
+**Table overview + audit:**
+
+| Method | Path | Body | Returns | Notes |
+|---|---|---|---|---|
+| GET | `/api/admin/tables` | — | `TableSummaryResponse[]` | Same grid as waiter/cashier |
+| GET | `/api/admin/tables/{tableId}` | — | `AdminTableDetailResponse` | Superset drill-down: `pin` + itemized `orders` + `estimatedTotal`, everything waiter and cashier separately see, in one response. Still headcount-only for participants — see `reveal-participants` below to go further |
+| POST | `/api/admin/tables/{tableId}/free-session` | `{ "pin": "1234" }` | 200 empty body | **PIN-gated override.** Force-closes the table's active session and frees the table regardless of order/participant state — the escape hatch for a genuinely stuck table. Does **not** touch order rows or generate a bill; whatever existed stays in the DB, still linked to the now-`CLOSED` session, visible afterward via `/api/admin/bills`/order history. 409 if no PIN is set yet, 401 on wrong PIN, 404 if no active session |
+| POST | `/api/admin/tables/{tableId}/reveal-participants` | `{ "pin": "1234" }` | `ParticipantResponse[]` — `{ customerId, phoneNumber, joinedAt, leftAt, isCreator }` | **PIN-gated.** The only way phone numbers are ever exposed — the normal `GET /api/admin/tables/{tableId}` above never includes them. Re-checks the PIN every single call, no caching. Includes everyone who's ever been part of the session, including those who've left |
+| GET | `/api/admin/orders/{orderId}/history` | — | `OrderStatusEventResponse[]` — `{ orderId, fromStatus, toStatus, changedByName, changedAt }` | The audit trail for one order. Works even after the order's been deleted post-billing |
+| GET | `/api/admin/bills?from=&to=` | — | `BillResponse[]` | Full bill history, not just pending — `from`/`to` optional ISO instants, omitted means all-time |
+
+**Table management:**
+
+| Method | Path | Body | Returns | Notes |
+|---|---|---|---|---|
+| GET | `/api/admin/tables/roster` | — | `TableManagementResponse[]` — `{ id, tableNumber, qrToken, status, retired }` | **All** tables including retired ones — this is the only place `qrToken` is exposed to staff (for printing/regenerating QR codes) |
+| POST | `/api/admin/tables` | `{ pin, tables: [{ tableNumber }, ...] }` | `TableManagementResponse[]` | Adds one or many tables in one PIN-gated call, auto-generates each `qrToken` |
+| PATCH | `/api/admin/tables/{tableId}` | `{ pin, tableNumber }` | `TableManagementResponse` | **Rename only** — retiring/reactivating moved to the two bulk endpoints below |
+| POST | `/api/admin/tables/retire` | `{ pin, tableIds: [...] }` | 200 empty body | Bulk-retire. 409 (whole batch rejected) if any listed table has a currently-active session — free it first. Retiring is always soft (never a hard delete — `TableSession` has a permanent FK to the table) |
+| POST | `/api/admin/tables/reactivate` | `{ pin, tableIds: [...] }` | 200 empty body | Bulk-reactivate — the reverse of retire |
+
+**Staff accounts:**
+
+| Method | Path | Body | Returns | Notes |
+|---|---|---|---|---|
+| GET | `/api/admin/staff` | — | `StaffResponse[]` — `{ id, name, username, role, active, email, contactNumber, address }` | Never includes password/PIN hashes. `email`/`contactNumber`/`address` shown here can come either from admin at creation time or from the staff member editing their own profile later (see `/api/staff/me` below) — admin can only set them at creation, not edit them afterward |
+| POST | `/api/admin/staff` | `{ pin, staff: [{ name, username, password, role, email?, contactNumber?, address? }, ...] }` | `StaffResponse[]` | Create one or many accounts in one PIN-gated call. `email`/`contactNumber`/`address` are optional per entry — admin can fill them in up front or leave them for the staff member to add later via `/api/staff/me`. 409 (whole batch rejected) if any `username` is already taken **or** repeated within the same batch — usernames must be checked against each other, not just the DB, since two new hires in the same call could otherwise collide. `password` is a **default/initial** password only — each new hire is expected to change it themselves via `/api/staff/me/password` once they log in. Admin has no way to set someone else's password after account creation — see below |
+| PATCH | `/api/admin/staff/{staffId}` | `{ pin, role? }` | `StaffResponse` | Single-account edit — **`role` only**. Admin cannot edit a staff member's name, username, or contact details after creation — all of that is self-service only, via `/api/staff/me`. Also **not** `active` (moved to the two bulk endpoints below) or password |
+| POST | `/api/admin/staff/activate` | `{ pin, staffIds: [...] }` | 200 empty body | Bulk-reactivate — login unblocks immediately for everyone listed |
+| POST | `/api/admin/staff/deactivate` | `{ pin, staffIds: [...] }` | 200 empty body | Bulk-deactivate — login blocks immediately (already-wired via `StaffUserDetails.isEnabled()`). 409 (whole batch rejected) if the acting admin's own id is anywhere in the list — remove it and resubmit |
+
+Deactivation is always soft — there's no delete endpoint for staff. `OrderStatusEvent.changedBy` and `CustomerOrder.confirmedBy` are real FKs to `StaffUser`, so a staff row can never be safely hard-deleted once it's been involved in any order.
+
+**Password resets are no longer an admin action.** Admin sets a default password only at account creation (above); after that, only the staff member themselves can change their own password, via `/api/staff/me/password` below. There's no "admin resets someone else's password" endpoint at all — if someone's genuinely locked out, an admin has to create a fresh account or the person needs a different recovery path outside this API.
+
+### My Account (`Authorization: Bearer <token>`, **any staff role** — waiter/kitchen/cashier/admin alike)
+
+Every staff member, regardless of role, manages their own profile and password here — this is not admin-only.
+
+| Method | Path | Body | Returns | Notes |
+|---|---|---|---|---|
+| GET | `/api/staff/me` | — | `StaffAccountResponse` — `{ staffId, name, username, role, email, contactNumber, address }` | The logged-in staff member's own profile |
+| PATCH | `/api/staff/me` | `{ name?, username?, email?, contactNumber?, address? }` | `StaffAccountResponse` | Partial update — only send changed fields. `name` and `username` both 409 if sent blank; `username` also 409s if another account already has it (same uniqueness check as admin creating a new account). `email`/`contactNumber`/`address` are always optional and can be cleared by sending an empty string. Changing `username` changes what to sign in with going forward — the current token stays valid, but the next login must use the new value |
+| PATCH | `/api/staff/me/password` | `{ "currentPassword": "...", "newPassword": "..." }` | 200 empty body | Self-service password change — always requires proving the current password first. 401 if `currentPassword` is wrong. This is the **only** way any staff account's password ever changes after creation |
+
+**Menu management:**
+
+| Method | Path | Body | Returns | Notes |
+|---|---|---|---|---|
+| GET | `/api/admin/menu/categories` | — | `AdminMenuCategoryResponse[]` — `{ id, name, sortOrder }` | All categories, unlike the public `/api/menu` which only shows available items |
+| POST | `/api/admin/menu/categories` | `{ pin, categories: [{ name, sortOrder? }, ...] }` | `AdminMenuCategoryResponse[]` | Create one or many categories in one PIN-gated call |
+| PATCH | `/api/admin/menu/categories/{id}` | `{ pin, name?, sortOrder? }` | `AdminMenuCategoryResponse` | Single-category rename/reorder — always PIN-gated, no exemption for categories |
+| POST | `/api/admin/menu/categories/delete` | `{ pin, categoryIds: [...] }` | 200 empty body | Bulk delete. 409 (whole batch rejected) if **any** listed category still has items — names every blocked category, not just the first, so you know exactly what to fix before retrying. Never cascade-deletes |
+| GET | `/api/admin/menu/items` | — | `AdminMenuItemResponse[]` — `{ id, categoryId, categoryName, name, description, price, imageUrl, available }` | All items, including unavailable ones |
+| POST | `/api/admin/menu/items` | `{ pin, items: [{ categoryId, name, description?, price, imageUrl?, available? }, ...] }` | `AdminMenuItemResponse[]` | Create one or many items in one PIN-gated call. `available` defaults to `true` per item |
+| PATCH | `/api/admin/menu/items/{id}` | `{ pin, categoryId?, name?, description?, price?, imageUrl? }` | `AdminMenuItemResponse` | Single-item detail edit — always PIN-gated. **Does not touch `available`** — use the dedicated endpoint below for that |
+| PATCH | `/api/admin/menu/items/{id}/availability` | `{ "available": true\|false }` | `AdminMenuItemResponse` | **The one PIN-free admin write action** — toggling an item on/off is frequent, low-risk, and fully reversible, so it's split into its own endpoint specifically so it never needs the PIN, regardless of what else you're doing |
+| POST | `/api/admin/menu/items/delete` | `{ pin, itemIds: [...] }` | 200 empty body | Bulk delete. 409 (whole batch rejected) if **any** listed item is part of an in-progress order — names every blocked item; mark those unavailable instead via the endpoint above. Past bills are never affected either way (`BillLineItem` is a permanent name/price snapshot, no FK to `MenuItem`) |
+
+**Analytics:** all three take optional `from`/`to` (ISO instant) query params, defaulting to all-time when omitted.
+
+| Method | Path | Returns | Notes |
+|---|---|---|---|
+| GET | `/api/admin/analytics/revenue?from=&to=` | `RevenueSummaryResponse` — `{ from, to, totalRevenue, totalTax, totalDiscount, billCount, averageBillValue, dailyBreakdown: [{ date, revenue, billCount }] }` | Sourced from `Bill` rows, which are never deleted — always complete |
+| GET | `/api/admin/analytics/top-items?from=&to=&limit=10` | `TopMenuItemResponse[]` — `{ menuItemName, quantitySold, revenue }` | Sorted by `quantitySold` descending, aggregated from bill line items |
+| GET | `/api/admin/analytics/timing?from=&to=` | `OperationalTimingResponse` — `{ from, to, averageTimeToConfirmSeconds, averageTimeToServeSeconds, ordersSampled }` | Average `PLACED`→`CONFIRMED` and `CONFIRMED`→`SERVED` durations, computed from `OrderStatusEvent` — includes orders still in flight, not just billed ones. Either average field is `null` if no matching order pairs exist in range |
 
 ---
 
@@ -256,7 +339,7 @@ Connect: `new SockJS('http://localhost:8080/ws')` wrapped in a STOMP client (e.g
 | `/topic/cashier` | `CashierNotice` — `{ event: "BILL_REQUESTED"\|"BILL_REQUEST_REVERTED"\|"BILL_GENERATED"\|"BILL_PAID", tableSessionId, tableNumber, bill: BillResponse\|null }` | Cashier dashboard | Bill requested / reverted / generated / paid. `bill` is only non-null for the generated/paid events |
 | `/topic/table/{sessionId}` | `OrderResponse` | Customer app (this specific session) | Any status change on one of this session's orders — waiter confirms, kitchen progresses, waiter edits a still-`PLACED` order, cashier reverts a bill request. Stops firing once the bill is generated (nothing left to push status updates about) — the frontend should treat this as the natural end of a visit, not a dropped connection |
 | `/topic/cart/{sessionId}` | `OrderResponse` (status `CART`) | Customer app (this specific session) | Any participant adds/edits/removes a cart item, or a fresh cart opens after submit |
-| `/topic/tables` | `TableSummaryResponse` | Waiter/cashier table-overview page | **One table's** summary changed — fires on session create/join/leave, cart submit, order confirm, item status change (kitchen progress, waiter serve), and any bill-request/generate/revert/pay. Not scoped per table — every connected waiter/cashier screen subscribes to this single shared topic and swaps out just the one tile matching the incoming `tableId`. This is a single global channel, unlike the other topics above which are per-session |
+| `/topic/tables` | `TableSummaryResponse` | Waiter/cashier/admin table-overview page | **One table's** summary changed — fires on session create/join/leave, cart submit, order confirm, item status change (kitchen progress, waiter serve), and any bill-request/generate/revert/pay/free-session. Not scoped per table — every connected waiter/cashier/admin screen subscribes to this single shared topic and swaps out just the one tile matching the incoming `tableId`. This is a single global channel, unlike the other topics above which are per-session |
 
 `{sessionId}` in the topic path is the **numeric** `sessionId` field from `SessionResponse`, not the `sessionToken` string. `/topic/tables` has no `{sessionId}`/`{tableId}` in its path — it's one topic for the whole restaurant, and each message payload carries its own `tableId` for the client to match against.
 
@@ -266,10 +349,10 @@ Connect: `new SockJS('http://localhost:8080/ws')` wrapped in a STOMP client (e.g
 
 ## Seeded data (fresh database)
 
-**Tables** T1–T5, each with a unique `qrToken` (query the DB or your own admin tooling to get these — there's currently no endpoint that lists tables/QR tokens for customers, by design).
+**Tables** T1–T5, each with a unique `qrToken` — staff can fetch these via `GET /api/admin/tables/roster` now; there's still no endpoint that exposes them to customers, by design.
 
 **Menu**: Starters (Paneer Tikka ₹220, Veg Spring Rolls ₹180), Main Course (Butter Chicken ₹340, Dal Makhani ₹260), Beverages (Masala Chai ₹60, Fresh Lime Soda ₹80). `imageUrl` is currently `null` on all seeded items until Cloudinary URLs are added.
 
-**Staff logins** (password `password123` for all): `waiter1` (WAITER), `kitchen1` (KITCHEN), `cashier1` (CASHIER), `admin1` (ADMIN).
+**Staff logins** (password `password123` for all): `waiter1` (WAITER), `kitchen1` (KITCHEN), `cashier1` (CASHIER), `admin1` (ADMIN). Each seeded account also has a sample `email`/`contactNumber`/`address` filled in already (fictional placeholder data, e.g. `waiter1@restropos.example`) — editable by that staff member via `PATCH /api/staff/me` like any other account. `admin1` has **no security PIN set** — call `PATCH /api/admin/me/pin` before exercising `free-session`/`reveal-participants`.
 
 **Customers**: none seeded — the customer table is empty until someone calls `POST /api/customers/login`, which creates a row on first use for any given phone number.

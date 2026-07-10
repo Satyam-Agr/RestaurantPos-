@@ -232,6 +232,20 @@ public class SessionService {
         return session;
     }
 
+    // Admin escape hatch for a genuinely stuck table — force-closes the session and frees the table
+    // regardless of order/participant state. Deliberately does not touch order rows or generate a bill;
+    // whatever existed stays in the DB, still linked to the now-CLOSED session, for later manual review.
+    @Transactional
+    public void forceCloseSessionForTable(Long tableId) {
+        RestaurantTable table = restaurantTableRepository.findById(tableId)
+                .orElseThrow(() -> new NotFoundException("Table " + tableId + " not found"));
+        TableSession session = tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE)
+                .orElseThrow(() -> new NotFoundException("No active session for this table"));
+
+        closeSessionAndFreeTable(session);
+        tableOverviewService.refreshAndBroadcast(session);
+    }
+
     void closeSessionAndFreeTable(TableSession session) {
         session.setStatus(SessionStatus.CLOSED);
         session.setClosedAt(Instant.now());

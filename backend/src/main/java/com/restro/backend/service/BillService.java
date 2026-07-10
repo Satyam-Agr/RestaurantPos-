@@ -208,6 +208,13 @@ public class BillService {
         return billRepository.findAllByPaidAtIsNull().stream().map(this::toResponse).toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<BillResponse> getBillHistory(Instant from, Instant to) {
+        return billRepository.findAllByGeneratedAtBetweenOrderByGeneratedAtDesc(from, to).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     private BillResponse toResponse(Bill bill) {
         List<BillLineItemResponse> items = bill.getLineItems().stream()
                 .map(li -> new BillLineItemResponse(li.getMenuItemName(), li.getQuantity(), li.getUnitPrice(), li.getLineTotal()))
@@ -215,6 +222,7 @@ public class BillService {
         return new BillResponse(
                 bill.getId(),
                 bill.getTableSession().getId(),
+                bill.getTableSession().getTable().getTableNumber(),
                 bill.getSubtotal(),
                 bill.getTax(),
                 bill.getDiscount(),

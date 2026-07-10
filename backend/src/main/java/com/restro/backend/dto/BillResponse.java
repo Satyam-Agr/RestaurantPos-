@@ -9,6 +9,7 @@ import java.util.List;
 public record BillResponse(
         Long id,
         Long tableSessionId,
+        String tableNumber,
         BigDecimal subtotal,
         BigDecimal tax,
         BigDecimal discount,
