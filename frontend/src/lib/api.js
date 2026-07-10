@@ -194,6 +194,10 @@ export const kitchenSetItemStatus = (itemId, itemStatus) =>
   api
     .patch(`/api/kitchen/order-items/${itemId}/status`, { itemStatus })
     .then((r) => r.data);
+export const kitchenTablesList = () =>
+  api.get("/api/kitchen/tables").then((r) => r.data);
+export const kitchenTableDetail = (tableId) =>
+  api.get(`/api/kitchen/tables/${tableId}`).then((r) => r.data);
 
 // Cashier
 export const cashierTablesList = () => api.get("/api/cashier/tables").then((r) => r.data);

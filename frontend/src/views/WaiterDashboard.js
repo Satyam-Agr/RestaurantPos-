@@ -1,57 +1,234 @@
+/* eslint-disable react/no-unstable-nested-components */
 import React, { useCallback, useEffect, useState } from "react";
 import StaffShell from "../components/StaffShell";
 import StaffTabs from "../components/StaffTabs";
+import TableGrid from "../components/TableGrid";
+import StatusBadge from "../components/StatusBadge";
+import OrderList from "../components/OrderList";
+import WaiterItemPicker from "../components/WaiterItemPicker";
+import StartTableModal from "../components/StartTableModal";
+import DetailPanel from "../components/DetailPanel";
+import useTableOverview from "../hooks/useTableOverview";
 import {
-  waiterPending,
-  waiterReady,
+  waiterTablesList,
+  waiterTableDetail,
   waiterConfirm,
   waiterServeItem,
   waiterRemoveItem,
   waiterUpdateItem,
+  waiterRequestBillForTable,
+  waiterPending,
+  waiterReady,
 } from "../lib/api";
 import { createStompClient } from "../lib/ws";
 import { toast } from "sonner";
 import {
+  Users,
+  KeyRound,
+  Loader2,
+  Receipt,
+  Plus,
+  Minus,
+  Trash2,
+  AlertTriangle,
+  X,
   CheckCircle2,
   ClipboardList,
   Bell,
-  Loader2,
-  Trash2,
-  Plus,
-  Minus,
-  AlertTriangle,
-  X,
 } from "lucide-react";
 
-export default function WaiterDashboard() {
+/**
+ * Single-route Waiter workspace. Tables and Queue tabs are swapped in place,
+ * so nothing here navigates via the router — this lets Admin embed the same
+ * component without route redirects.
+ */
+export default function WaiterDashboard({ embedded = false }) {
+  const [tab, setTab] = useState("tables");
+
+  const content = (
+    <>
+      {tab === "tables" ? <WaiterTablesView /> : <WaiterQueueView setTab={setTab} />}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div data-testid="waiter-workspace" className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        <StaffTabs current={tab} onChange={setTab} />
+        {content}
+      </div>
+    );
+  }
+  return (
+    <StaffShell title="Waiter" subtitle="WAITER" testId="waiter-dashboard">
+      <StaffTabs current={tab} onChange={setTab} />
+      {content}
+    </StaffShell>
+  );
+}
+
+// ---------------- Tables view ----------------
+
+function WaiterTablesView() {
+  const { tables, loading, refresh } = useTableOverview(waiterTablesList);
+  const [active, setActive] = useState(null);
+  const [startFor, setStartFor] = useState(null);
+
+  const handleSelect = (table) => {
+    if (table.overviewStatus === "AVAILABLE") setStartFor(table);
+    else setActive(table);
+  };
+
+  return (
+    <div data-testid="waiter-tables-page">
+      <div className="flex justify-end mb-2">
+        <button
+          onClick={refresh}
+          disabled={loading}
+          data-testid="waiter-refresh-tables"
+          className="text-xs text-ink2 hover:text-brand transition"
+        >
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+      <TableGrid
+        tables={tables}
+        role="waiter"
+        activeTableId={active?.tableId ?? startFor?.tableId}
+        loading={loading}
+        onSelect={handleSelect}
+      />
+      {active && <WaiterTableDetail summary={active} onClose={() => setActive(null)} />}
+      {startFor && (
+        <StartTableModal
+          tableId={startFor.tableId}
+          tableNumber={startFor.tableNumber}
+          onClose={() => setStartFor(null)}
+          onStarted={() => {
+            setStartFor(null);
+            refresh();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function WaiterTableDetail({ summary, onClose }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(null);
+  const [showPicker, setShowPicker] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setDetail(await waiterTableDetail(summary.tableId));
+    } catch (e) {
+      toast.error(e.message);
+      onClose();
+    } finally {
+      setLoading(false);
+    }
+  }, [summary.tableId, onClose]);
+
+  useEffect(() => {
+    load();
+  }, [load, summary.overviewStatus, summary.ordersAwaitingConfirmation, summary.itemsReadyToServe]);
+
+  const confirmOrder = async (orderId) => {
+    setBusy(`c-${orderId}`);
+    try { await waiterConfirm(orderId); toast.success(`Order #${orderId} confirmed`); load(); }
+    catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
+  };
+  const serveItem = async (itemId) => {
+    setBusy(`s-${itemId}`);
+    try { await waiterServeItem(itemId); toast.success("Item served"); load(); }
+    catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
+  };
+  const requestBill = async () => {
+    setBusy("bill");
+    try { await waiterRequestBillForTable(summary.tableId); toast.success("Bill requested"); load(); }
+    catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
+  };
+
+  const canRequestBill = detail?.overviewStatus === "SERVED_AWAITING_BILL";
+  const canAddOrder = detail && detail.sessionId && detail.overviewStatus !== "BILL_REQUESTED";
+
+  return (
+    <DetailPanel onClose={onClose} testId="waiter-table-detail">
+      {loading ? (
+        <div className="grid place-items-center py-16"><Loader2 className="animate-spin text-brand" size={24} /></div>
+      ) : !detail ? null : (
+        <>
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Table</div>
+              <div className="font-heading text-4xl font-bold tracking-tight">{detail.tableNumber}</div>
+              <div className="mt-2"><StatusBadge status={detail.overviewStatus} /></div>
+            </div>
+            {detail.pin && (
+              <div className="bg-brand/10 border border-brand/20 rounded-2xl px-3 py-2 text-right">
+                <div className="text-[9px] uppercase tracking-widest text-brand/80 font-semibold flex items-center gap-1 justify-end"><KeyRound size={10} />PIN</div>
+                <div className="font-mono font-bold tracking-[0.3em] text-brand text-base">{detail.pin}</div>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-4 text-xs text-ink2 mb-5">
+            <span className="inline-flex items-center gap-1.5"><Users size={12} />{detail.participantCount} {detail.participantCount === 1 ? "person" : "people"}</span>
+            {detail.openedAt && <span>Opened {new Date(detail.openedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
+          </div>
+          {canAddOrder && (
+            <button onClick={() => setShowPicker(true)} data-testid="add-order-btn" className="mb-4 w-full flex items-center justify-center gap-2 rounded-full border-2 border-dashed border-brand/50 text-brand hover:bg-brand/5 font-medium py-2.5 transition">
+              <Plus size={14} />Add Order
+            </button>
+          )}
+          <OrderList orders={detail.orders} onConfirmOrder={confirmOrder} onServeItem={serveItem} busy={busy} />
+          {canRequestBill && !detail.billRequested && (
+            <button onClick={requestBill} disabled={busy === "bill"} data-testid="waiter-request-bill-btn" className="mt-5 w-full flex items-center justify-center gap-2 rounded-full bg-ink hover:bg-black text-white font-medium py-3 shadow-lift transition disabled:opacity-50">
+              {busy === "bill" ? <Loader2 className="animate-spin" size={14} /> : <Receipt size={14} />}
+              Request Bill
+            </button>
+          )}
+          {detail.billRequested && (
+            <div className="mt-5 text-center rounded-2xl border border-yellow-300 bg-yellow-50 text-yellow-800 py-3 text-sm font-medium">
+              Bill already requested — waiting for cashier.
+            </div>
+          )}
+          {showPicker && (
+            <WaiterItemPicker tableId={detail.tableId} tableNumber={detail.tableNumber} onClose={() => setShowPicker(false)} onPlaced={() => { setShowPicker(false); load(); }} />
+          )}
+        </>
+      )}
+    </DetailPanel>
+  );
+}
+
+// ---------------- Queue view ----------------
+
+function WaiterQueueView() {
   const [pending, setPending] = useState([]);
   const [ready, setReady] = useState([]);
   const [busy, setBusy] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState(null); // { orderId, item }
+  const [confirmRemove, setConfirmRemove] = useState(null);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
       const [p, r] = await Promise.all([waiterPending(), waiterReady()]);
-      setPending(p);
-      setReady(r);
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setRefreshing(false);
-    }
+      setPending(p); setReady(r);
+    } catch (e) { toast.error(e.message); }
+    finally { setRefreshing(false); }
   }, []);
 
   useEffect(() => {
     refresh();
     const { deactivate } = createStompClient({
-      subscriptions: [
-        {
-          topic: "/topic/waiter",
-          handler: () => refresh(),
-        },
-      ],
+      subscriptions: [{ topic: "/topic/waiter", handler: () => refresh() }],
       onConnect: refresh,
     });
     const onVis = () => document.visibilityState === "visible" && refresh();
@@ -66,59 +243,30 @@ export default function WaiterDashboard() {
 
   const confirm = async (orderId) => {
     setBusy(`c-${orderId}`);
-    try {
-      await waiterConfirm(orderId);
-      toast.success(`Order #${orderId} confirmed`);
-      refresh();
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setBusy(null);
-    }
+    try { await waiterConfirm(orderId); toast.success(`Order #${orderId} confirmed`); refresh(); }
+    catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
   };
-
   const serveItem = async (itemId) => {
     setBusy(`s-${itemId}`);
-    try {
-      await waiterServeItem(itemId);
-      toast.success("Item served");
-      refresh();
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setBusy(null);
-    }
+    try { await waiterServeItem(itemId); toast.success("Item served"); refresh(); }
+    catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
   };
-
   const removeItem = async (orderId, itemId) => {
     setBusy(`r-${itemId}`);
-    try {
-      await waiterRemoveItem(orderId, itemId);
-      toast.success("Item removed");
-      refresh();
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setBusy(null);
-    }
+    try { await waiterRemoveItem(orderId, itemId); toast.success("Item removed"); refresh(); }
+    catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
   };
-
   const changeQty = async (orderId, item, delta) => {
     const newQty = (item.quantity || 0) + delta;
-    // Guardrail: never remove via decrement — must use trash button (with confirm).
     if (newQty < 1) return;
     setBusy(`q-${item.id}`);
-    try {
-      // PATCH /api/waiter/orders/{orderId}/items/{itemId} with { quantity }
-      await waiterUpdateItem(orderId, item.id, { quantity: newQty });
-      refresh();
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setBusy(null);
-    }
+    try { await waiterUpdateItem(orderId, item.id, { quantity: newQty }); refresh(); }
+    catch (e) { toast.error(e.message); }
+    finally { setBusy(null); }
   };
-
   const confirmAndRemove = async () => {
     if (!confirmRemove) return;
     const { orderId, item } = confirmRemove;
@@ -127,178 +275,71 @@ export default function WaiterDashboard() {
   };
 
   return (
-    <StaffShell title="Waiter Dashboard" subtitle="WAITER" testId="waiter-dashboard">
-      <StaffTabs current="queue" role="waiter" refreshing={refreshing} onRefresh={refresh} />
-      <div className="text-ink2 mb-4">
-        {pending.length} pending · {ready.length} ready to serve
-      </div>
-
+    <div data-testid="waiter-queue-view">
+      <div className="text-ink2 mb-4">{pending.length} pending · {ready.length} ready to serve</div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Pending */}
-        <Column
-          title="Pending"
-          count={pending.length}
-          Icon={ClipboardList}
-          color="bg-blue-100 text-blue-700"
-          empty="No pending orders — well done!"
-        >
+        <Column title="Pending" count={pending.length} Icon={ClipboardList} color="bg-blue-100 text-blue-700" empty="No pending orders — well done!">
           {pending.map((o) => (
-            <div
-              key={o.id}
-              data-testid={`pending-order-${o.id}`}
-              className="bg-surface border border-bg2 rounded-2xl p-4 animate-fadeUp"
-            >
+            <div key={o.id} data-testid={`pending-order-${o.id}`} className="bg-surface border border-bg2 rounded-2xl p-4 animate-fadeUp">
               <OrderHeader order={o} />
-              <ItemList
-                items={o.items}
-                actions={(it) => (
-                  <div className="flex items-center gap-1">
-                    <div className="flex items-center gap-0.5 bg-bg rounded-full px-1 py-0.5">
-                      <button
-                        onClick={() => changeQty(o.id, it, -1)}
-                        disabled={busy === `q-${it.id}` || it.quantity <= 1}
-                        title={it.quantity <= 1 ? "Use trash icon to remove" : undefined}
-                        data-testid={`w-dec-${it.id}`}
-                        className="h-6 w-6 grid place-items-center rounded-full hover:bg-bg2 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                      >
-                        <Minus size={12} />
-                      </button>
-                      <span className="w-5 text-center text-xs font-mono">{it.quantity}</span>
-                      <button
-                        onClick={() => changeQty(o.id, it, +1)}
-                        disabled={busy === `q-${it.id}`}
-                        data-testid={`w-inc-${it.id}`}
-                        className="h-6 w-6 grid place-items-center rounded-full hover:bg-bg2 disabled:opacity-30"
-                      >
-                        <Plus size={12} />
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => setConfirmRemove({ orderId: o.id, item: it })}
-                      disabled={busy === `r-${it.id}`}
-                      data-testid={`w-remove-${it.id}`}
-                      className="h-6 w-6 grid place-items-center rounded-full text-ink2 hover:text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 size={12} />
-                    </button>
+              <ItemList items={o.items} actions={(it) => (
+                <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-0.5 bg-bg rounded-full px-1 py-0.5">
+                    <button onClick={() => changeQty(o.id, it, -1)} disabled={busy === `q-${it.id}` || it.quantity <= 1} title={it.quantity <= 1 ? "Use trash icon to remove" : undefined} data-testid={`w-dec-${it.id}`} className="h-6 w-6 grid place-items-center rounded-full hover:bg-bg2 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"><Minus size={12} /></button>
+                    <span className="w-5 text-center text-xs font-mono">{it.quantity}</span>
+                    <button onClick={() => changeQty(o.id, it, +1)} disabled={busy === `q-${it.id}`} data-testid={`w-inc-${it.id}`} className="h-6 w-6 grid place-items-center rounded-full hover:bg-bg2 disabled:opacity-30"><Plus size={12} /></button>
                   </div>
-                )}
-              />
-              <button
-                onClick={() => confirm(o.id)}
-                disabled={busy === `c-${o.id}`}
-                data-testid={`confirm-order-${o.id}`}
-                className="mt-3 w-full flex items-center justify-center gap-2 rounded-full bg-brand hover:bg-brandHover text-white font-medium py-2.5 transition-all disabled:opacity-50"
-              >
-                {busy === `c-${o.id}` ? (
-                  <Loader2 className="animate-spin" size={14} />
-                ) : (
-                  <CheckCircle2 size={14} />
-                )}
-                Confirm Order
+                  <button onClick={() => setConfirmRemove({ orderId: o.id, item: it })} disabled={busy === `r-${it.id}`} data-testid={`w-remove-${it.id}`} className="h-6 w-6 grid place-items-center rounded-full text-ink2 hover:text-destructive hover:bg-destructive/10"><Trash2 size={12} /></button>
+                </div>
+              )} />
+              <button onClick={() => confirm(o.id)} disabled={busy === `c-${o.id}`} data-testid={`confirm-order-${o.id}`} className="mt-3 w-full flex items-center justify-center gap-2 rounded-full bg-brand hover:bg-brandHover text-white font-medium py-2.5 transition-all disabled:opacity-50">
+                {busy === `c-${o.id}` ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}Confirm Order
               </button>
             </div>
           ))}
         </Column>
-
-        {/* Ready to serve */}
-        <Column
-          title="Ready to Serve"
-          count={ready.length}
-          Icon={Bell}
-          color="bg-emerald-100 text-emerald-800"
-          empty="Nothing ready yet."
-        >
+        <Column title="Ready to Serve" count={ready.length} Icon={Bell} color="bg-emerald-100 text-emerald-800" empty="Nothing ready yet.">
           {ready.map((o) => (
-            <div
-              key={o.id}
-              data-testid={`ready-order-${o.id}`}
-              className="bg-surface border border-bg2 rounded-2xl p-4 animate-fadeUp"
-            >
+            <div key={o.id} data-testid={`ready-order-${o.id}`} className="bg-surface border border-bg2 rounded-2xl p-4 animate-fadeUp">
               <OrderHeader order={o} />
-              <ItemList
-                items={o.items}
-                actions={(it) =>
-                  it.itemStatus === "READY" ? (
-                    <button
-                      onClick={() => serveItem(it.id)}
-                      disabled={busy === `s-${it.id}`}
-                      data-testid={`serve-item-${it.id}`}
-                      className="text-xs bg-successc hover:opacity-90 text-white rounded-full px-3 py-1 flex items-center gap-1 disabled:opacity-50"
-                    >
-                      {busy === `s-${it.id}` ? (
-                        <Loader2 className="animate-spin" size={10} />
-                      ) : (
-                        <CheckCircle2 size={10} />
-                      )}
-                      Serve
-                    </button>
-                  ) : null
-                }
-              />
+              <ItemList items={o.items} actions={(it) => it.itemStatus === "READY" ? (
+                <button onClick={() => serveItem(it.id)} disabled={busy === `s-${it.id}`} data-testid={`serve-item-${it.id}`} className="text-xs bg-successc hover:opacity-90 text-white rounded-full px-3 py-1 flex items-center gap-1 disabled:opacity-50">
+                  {busy === `s-${it.id}` ? <Loader2 className="animate-spin" size={10} /> : <CheckCircle2 size={10} />}Serve
+                </button>
+              ) : null} />
             </div>
           ))}
         </Column>
       </div>
-
       {confirmRemove && (
-        <ConfirmRemoveModal
-          item={confirmRemove.item}
-          orderId={confirmRemove.orderId}
-          onCancel={() => setConfirmRemove(null)}
-          onConfirm={confirmAndRemove}
-        />
+        <ConfirmRemoveModal item={confirmRemove.item} orderId={confirmRemove.orderId} onCancel={() => setConfirmRemove(null)} onConfirm={confirmAndRemove} />
       )}
-    </StaffShell>
+      <div className="mt-4 text-right">
+        <button onClick={refresh} disabled={refreshing} data-testid="waiter-refresh-queue" className="text-xs text-ink2 hover:text-brand transition">
+          {refreshing ? "Refreshing…" : "Refresh queue"}
+        </button>
+      </div>
+    </div>
   );
 }
 
+// ---------------- Shared ----------------
+
 function ConfirmRemoveModal({ item, orderId, onCancel, onConfirm }) {
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] grid place-items-center p-4"
-      onClick={onCancel}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        data-testid="waiter-confirm-remove"
-        className="bg-surface rounded-2xl w-full max-w-sm p-5 shadow-lift animate-fadeUp"
-      >
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] grid place-items-center p-4" onClick={onCancel}>
+      <div onClick={(e) => e.stopPropagation()} data-testid="waiter-confirm-remove" className="bg-surface rounded-2xl w-full max-w-sm p-5 shadow-lift animate-fadeUp">
         <div className="flex items-start gap-3">
-          <div className="h-9 w-9 rounded-full bg-destructive/10 grid place-items-center shrink-0">
-            <AlertTriangle size={16} className="text-destructive" />
-          </div>
+          <div className="h-9 w-9 rounded-full bg-destructive/10 grid place-items-center shrink-0"><AlertTriangle size={16} className="text-destructive" /></div>
           <div className="flex-1">
             <h3 className="font-heading font-semibold text-base">Remove this item?</h3>
-            <p className="text-sm text-ink2 mt-1">
-              <span className="text-ink font-medium">
-                {item.quantity}× {item.menuItemName || item.name}
-              </span>{" "}
-              from order #{orderId}.
-            </p>
+            <p className="text-sm text-ink2 mt-1"><span className="text-ink font-medium">{item.quantity}× {item.menuItemName || item.name}</span> from order #{orderId}.</p>
           </div>
-          <button
-            onClick={onCancel}
-            className="text-ink2 hover:text-ink p-1 rounded-full hover:bg-bg2"
-          >
-            <X size={14} />
-          </button>
+          <button onClick={onCancel} className="text-ink2 hover:text-ink p-1 rounded-full hover:bg-bg2"><X size={14} /></button>
         </div>
         <div className="mt-5 flex gap-2 justify-end">
-          <button
-            onClick={onCancel}
-            data-testid="waiter-cancel-remove"
-            className="text-sm rounded-full border border-bg2 hover:bg-bg2/60 px-4 py-1.5 transition"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            data-testid="waiter-confirm-remove-btn"
-            className="text-sm rounded-full bg-destructive hover:opacity-90 text-white px-4 py-1.5 transition"
-          >
-            Remove
-          </button>
+          <button onClick={onCancel} data-testid="waiter-cancel-remove" className="text-sm rounded-full border border-bg2 hover:bg-bg2/60 px-4 py-1.5 transition">Cancel</button>
+          <button onClick={onConfirm} data-testid="waiter-confirm-remove-btn" className="text-sm rounded-full bg-destructive hover:opacity-90 text-white px-4 py-1.5 transition">Remove</button>
         </div>
       </div>
     </div>
@@ -310,20 +351,12 @@ function Column({ title, count, Icon, color, empty, children }) {
   return (
     <section>
       <div className="flex items-center gap-2 mb-3">
-        <div className={`h-7 w-7 grid place-items-center rounded-full ${color}`}>
-          <Icon size={13} />
-        </div>
+        <div className={`h-7 w-7 grid place-items-center rounded-full ${color}`}><Icon size={13} /></div>
         <h2 className="font-heading text-xl font-semibold">{title}</h2>
         <span className="text-xs text-ink2 font-mono">({count})</span>
       </div>
       <div className="space-y-3">
-        {items.length ? (
-          items
-        ) : (
-          <div className="text-center py-10 text-ink2 border border-dashed border-bg2 rounded-2xl">
-            {empty}
-          </div>
-        )}
+        {items.length ? items : <div className="text-center py-10 text-ink2 border border-dashed border-bg2 rounded-2xl">{empty}</div>}
       </div>
     </section>
   );
@@ -333,19 +366,10 @@ function OrderHeader({ order }) {
   return (
     <div className="flex items-center justify-between mb-3">
       <div>
-        <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">
-          Table {order.tableNumber} · Order #{order.id}
-        </div>
+        <div className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Table {order.tableNumber} · Order #{order.id}</div>
         <div className="font-heading font-semibold">{order.status}</div>
       </div>
-      {order.placedAt && (
-        <div className="text-xs text-ink2">
-          {new Date(order.placedAt).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </div>
-      )}
+      {order.placedAt && <div className="text-xs text-ink2">{new Date(order.placedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>}
     </div>
   );
 }
@@ -354,32 +378,13 @@ function ItemList({ items, actions }) {
   return (
     <div className="space-y-1.5">
       {items?.map((it) => (
-        <div
-          key={it.id}
-          className={`flex items-center justify-between text-sm py-1 ${
-            it.itemStatus === "CANCELLED" ? "opacity-50" : ""
-          }`}
-        >
+        <div key={it.id} className={`flex items-center justify-between text-sm py-1 ${it.itemStatus === "CANCELLED" ? "opacity-50" : ""}`}>
           <div className="flex items-center gap-2 min-w-0">
-            <span
-              className={`text-ink font-medium ${
-                it.itemStatus === "CANCELLED" ? "line-through" : ""
-              }`}
-            >
-              {it.quantity}× {it.menuItemName || it.name}
-            </span>
-            {it.notes && (
-              <span className="text-xs text-ink2 italic truncate">— {it.notes}</span>
-            )}
+            <span className={`text-ink font-medium ${it.itemStatus === "CANCELLED" ? "line-through" : ""}`}>{it.quantity}× {it.menuItemName || it.name}</span>
+            {it.notes && <span className="text-xs text-ink2 italic truncate">— {it.notes}</span>}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <span
-              className={`text-[9px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${
-                itemColor(it.itemStatus)
-              }`}
-            >
-              {it.itemStatus}
-            </span>
+            <span className={`text-[9px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${itemColor(it.itemStatus)}`}>{it.itemStatus}</span>
             {actions?.(it)}
           </div>
         </div>
@@ -389,14 +394,12 @@ function ItemList({ items, actions }) {
 }
 
 function itemColor(s) {
-  return (
-    {
-      PENDING: "bg-slate-100 text-slate-700",
-      CONFIRMED: "bg-blue-100 text-blue-700",
-      PREPARING: "bg-amber-100 text-amber-800",
-      READY: "bg-emerald-100 text-emerald-800",
-      SERVED: "bg-successc/15 text-successc",
-      CANCELLED: "bg-red-100 text-red-700",
-    }[s] || "bg-slate-100 text-slate-700"
-  );
+  return ({
+    PENDING: "bg-slate-100 text-slate-700",
+    CONFIRMED: "bg-blue-100 text-blue-700",
+    PREPARING: "bg-amber-100 text-amber-800",
+    READY: "bg-emerald-100 text-emerald-800",
+    SERVED: "bg-successc/15 text-successc",
+    CANCELLED: "bg-red-100 text-red-700",
+  }[s] || "bg-slate-100 text-slate-700");
 }

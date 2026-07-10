@@ -16,6 +16,14 @@ Build a professional, reactive React (no TypeScript) frontend for an already-bui
 4. **Cashier** — sees pending bills, generates bill (tax %, discount), records payment (CASH/CARD/UPI/OTHER).
 
 ## What's Been Implemented — Feb 2026
+- **Unified role dashboards + no-redirect tab switching (Feb 2026)**:
+  - Every role now has a **single route** (`/staff/waiter`, `/staff/kitchen`, `/staff/cashier`) that hosts both Tables and Queue views. Tabs swap views **in-place via internal React state** — no navigation, so `ProtectedStaffRoute` no longer trips.
+  - `StaffTabs` refactored to a controlled component (`current` + `onChange`), stripped of `useNavigate`.
+  - Old routes `/staff/{role}/tables` and `/staff/{role}/queue` are gone (redirected to the base).
+  - `WaiterTablesPage.js` and `CashierTablesPage.js` deleted; their content merged into the unified dashboards.
+  - `DetailPanel` extracted to `components/DetailPanel.js` (shared by all four role views).
+- **Kitchen restaurant-floor view (Feb 2026)**: Kitchen now has a Tables tab identical in shape to waiter/cashier, wired to `GET /api/kitchen/tables` and `GET /api/kitchen/tables/{tableId}`. Drill-down shows the same order/item structure the waiter sees, but read-only (no confirm/serve — item state changes still happen from the Queue tab).
+- **Admin Operate 3-way slider (Feb 2026)**: `AdminOperate` now has an animated 3-way pill slider (Waiter / Cashier / Kitchen) with a smooth `translateX` thumb. Each mode mounts the corresponding dashboard with `embedded={true}` so no `StaffShell` chrome is duplicated and no route change fires when the admin flips between Tables/Queue inside a workspace.
 - **All admin edit modals are now PIN-gated (Feb 2026)**:
   - **Staff edit** reduced to role-only. Name/username/email/contact/address are shown read-only. Save opens `PinModal` → `PATCH /api/admin/staff/{id}` `{ pin, role }`. Save is disabled when role is unchanged.
   - **Table edit** = rename only, PIN-gated. → `PATCH /api/admin/tables/{id}` `{ pin, tableNumber }`.

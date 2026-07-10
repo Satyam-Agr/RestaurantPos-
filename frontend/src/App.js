@@ -6,10 +6,8 @@ import TableAccess from "./views/TableAccess";
 import OrderSession from "./views/OrderSession";
 import StaffLogin from "./views/StaffLogin";
 import WaiterDashboard from "./views/WaiterDashboard";
-import WaiterTablesPage from "./views/WaiterTablesPage";
 import KitchenDashboard from "./views/KitchenDashboard";
 import CashierDashboard from "./views/CashierDashboard";
-import CashierTablesPage from "./views/CashierTablesPage";
 import MyAccount from "./views/MyAccount";
 import AdminModeSelect from "./views/AdminModeSelect";
 import AdminOverview from "./views/AdminOverview";
@@ -39,26 +37,11 @@ function App() {
           path="/staff/waiter"
           element={
             <ProtectedStaffRoute role="WAITER">
-              <WaiterTablesPage />
-            </ProtectedStaffRoute>
-          }
-        />
-        <Route
-          path="/staff/waiter/tables"
-          element={
-            <ProtectedStaffRoute role="WAITER">
-              <WaiterTablesPage />
-            </ProtectedStaffRoute>
-          }
-        />
-        <Route
-          path="/staff/waiter/queue"
-          element={
-            <ProtectedStaffRoute role="WAITER">
               <WaiterDashboard />
             </ProtectedStaffRoute>
           }
         />
+        <Route path="/staff/waiter/*" element={<Navigate to="/staff/waiter" replace />} />
         <Route
           path="/staff/kitchen"
           element={
@@ -71,26 +54,11 @@ function App() {
           path="/staff/cashier"
           element={
             <ProtectedStaffRoute role="CASHIER">
-              <CashierTablesPage />
-            </ProtectedStaffRoute>
-          }
-        />
-        <Route
-          path="/staff/cashier/tables"
-          element={
-            <ProtectedStaffRoute role="CASHIER">
-              <CashierTablesPage />
-            </ProtectedStaffRoute>
-          }
-        />
-        <Route
-          path="/staff/cashier/queue"
-          element={
-            <ProtectedStaffRoute role="CASHIER">
               <CashierDashboard />
             </ProtectedStaffRoute>
           }
         />
+        <Route path="/staff/cashier/*" element={<Navigate to="/staff/cashier" replace />} />
 
         {/* Admin */}
         <Route

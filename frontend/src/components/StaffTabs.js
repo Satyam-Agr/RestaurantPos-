@@ -1,38 +1,42 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
 import { LayoutGrid, ListChecks, RefreshCw } from "lucide-react";
 
-export default function StaffTabs({ current, role, refreshing, onRefresh }) {
-  const nav = useNavigate();
-  const base = `/staff/${role}`;
+const DEFAULT_TABS = [
+  { key: "tables", label: "Tables", Icon: LayoutGrid },
+  { key: "queue", label: "Queue", Icon: ListChecks },
+];
 
+/**
+ * Controlled tab strip. Does not touch the router — the parent owns the
+ * active-tab state and swaps content in-place. That lets Admin embed the
+ * same workspace without triggering a route change (and getting bounced
+ * by ProtectedStaffRoute).
+ */
+export default function StaffTabs({
+  current,
+  onChange,
+  tabs = DEFAULT_TABS,
+  refreshing,
+  onRefresh,
+}) {
   return (
     <div className="mb-4 flex items-center justify-between gap-3">
       <div className="inline-flex rounded-full bg-bg2/60 p-1">
-        <button
-          onClick={() => nav(`${base}/tables`)}
-          data-testid="tab-tables"
-          className={`px-4 py-1.5 rounded-full text-sm font-medium flex items-center gap-1.5 transition ${
-            current === "tables"
-              ? "bg-white shadow-soft text-ink"
-              : "text-ink2 hover:text-ink"
-          }`}
-        >
-          <LayoutGrid size={14} />
-          Tables
-        </button>
-        <button
-          onClick={() => nav(`${base}/queue`)}
-          data-testid="tab-queue"
-          className={`px-4 py-1.5 rounded-full text-sm font-medium flex items-center gap-1.5 transition ${
-            current === "queue"
-              ? "bg-white shadow-soft text-ink"
-              : "text-ink2 hover:text-ink"
-          }`}
-        >
-          <ListChecks size={14} />
-          Queue
-        </button>
+        {tabs.map(({ key, label, Icon }) => (
+          <button
+            key={key}
+            onClick={() => onChange(key)}
+            data-testid={`tab-${key}`}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium flex items-center gap-1.5 transition ${
+              current === key
+                ? "bg-white shadow-soft text-ink"
+                : "text-ink2 hover:text-ink"
+            }`}
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
       </div>
       {onRefresh && (
         <button
