@@ -15,7 +15,7 @@ WebSocket endpoint: `http://localhost:8080/ws` (SockJS + STOMP)
 - **The session creator can't abandon an in-progress order**: if the phone number that *created* the session (not a joiner — joiners can always leave freely) tries to leave while any order in that session is at `PLACED` or later (submitted but not yet paid/cancelled), `leave` 409s with a message explaining why. This is deliberate — someone has to stay accountable for a table with food already in motion. Once every order in the session is either not-yet-submitted (`CART`), `CANCELLED`, or the bill has been generated (order rows are deleted at that point), the creator is free to leave like anyone else.
 - **Auto-close on an empty, order-free table**: after any `leave` call, if the session's participant roster has hit zero (everyone, including the creator, has left) *and* there's no order at `PLACED` or later, the session closes and the table frees automatically — no cashier action needed. This mainly matters for a table that was created and then abandoned before anything was actually ordered. There's no dedicated notification for this — poll `GET /api/customers/me/session` (404→204 transition) or `GET /api/sessions/status/{qrToken}` to notice it happened.
 - **Staff** (waiter/kitchen/cashier/admin): JWT bearer tokens obtained via `POST /api/auth/login`. Send as `Authorization: Bearer <token>` on every staff-role request.
-- **Admin can also operate as waiter or cashier**: an `ADMIN` token is authorized on `/api/waiter/**` and `/api/cashier/**`/`/api/bills/**` in addition to `/api/admin/**` — deliberately **not** `/api/kitchen/**`. Every action taken this way is attributed to the admin's own staff account (`confirmedBy`, `changedBy`, etc.), exactly as if a waiter/cashier had done it themselves. No separate admin-flavored versions of those endpoints exist — reuse them as-is.
+- **Admin can also operate as waiter, kitchen, or cashier**: an `ADMIN` token is authorized on `/api/waiter/**`, `/api/kitchen/**`, and `/api/cashier/**`/`/api/bills/**` in addition to `/api/admin/**`. Every action taken this way is attributed to the admin's own staff account (`confirmedBy`, `changedBy`, etc.), exactly as if that role's own staff member had done it themselves. No separate admin-flavored versions of those endpoints exist — reuse them as-is.
 - **Admin security PIN**: separate from the login password, only relevant for `ADMIN` accounts, gates two sensitive actions (`free-session`, `reveal-participants` — see the Admin section below). A fresh admin account (including seeded `admin1`) has no PIN set — those two endpoints 409 with "Set your security PIN first" until `PATCH /api/admin/me/pin` is called. The PIN is re-checked on every single sensitive call (sent in that call's own request body) — there's no elevated "unlocked" session state to manage on the frontend.
 - **Walk-in tables opened by a waiter**: a waiter can open a table's order list directly (`POST /api/waiter/tables/{tableId}/session`) for a customer who never touches their phone at all — no customer login involved. This is entirely transparent to the customer-facing app: if that table's customer *does* eventually scan the QR code, `GET /api/sessions/status/{qrToken}` still reports `activeSessionExists: false` and `POST /api/sessions/create/{qrToken}` still behaves like a normal create — under the hood it silently attaches that customer to the session the waiter already opened (same `sessionToken`, same PIN) instead of starting a fresh one, so the customer immediately sees whatever the waiter already entered via `GET /api/sessions/{sessionToken}/orders`. No frontend changes needed for this — it's a backend-only behavior, mentioned here so it's not surprising if `create` ever returns order history that "shouldn't" exist yet. Once a session's been claimed this way, everything (join, leave, creator-lock, etc.) behaves exactly like any other customer-created session.
 
@@ -29,6 +29,8 @@ ItemStatus:          PENDING, CONFIRMED, PREPARING, READY, SERVED, CANCELLED
 PaymentMethod:       CASH, CARD, UPI, OTHER
 StaffRole:           WAITER, KITCHEN, CASHIER, ADMIN
 TableOverviewStatus: AVAILABLE, AWAITING_ORDER, NEEDS_CONFIRMATION, PREPARING, READY_TO_SERVE, SERVED_AWAITING_BILL, BILL_REQUESTED
+DietaryType:         VEG, NON_VEG, EGG
+CustomizationType:   RADIO, CHECKBOX
 ```
 
 `OrderStatus.CART` is the shared draft basket before submission — it never appears in any staff-facing list (waiter/kitchen queries only ever return `PLACED`/`CONFIRMED`/etc.).
@@ -57,12 +59,16 @@ TableOverviewStatus: AVAILABLE, AWAITING_ORDER, NEEDS_CONFIRMATION, PREPARING, R
   "menuItemId": 1,
   "menuItemName": "Paneer Tikka",
   "quantity": 2,
-  "unitPrice": 220.00,
-  "notes": "extra spicy",
-  "itemStatus": "PENDING"
+  "unitPrice": 345.00,
+  "notes": "less spicy per customer request",
+  "itemStatus": "PENDING",
+  "selectedOptions": [
+    { "groupName": "Portion Size", "optionName": "Large", "priceDelta": 80.00 },
+    { "groupName": "Add-ons", "optionName": "Extra Cheese", "priceDelta": 30.00 }
+  ]
 }
 ```
-An item with `itemStatus: "CANCELLED"` stays in the list (soft-removed, e.g. by a waiter) — the UI should show it struck-through / labeled "removed", not hide it.
+An item with `itemStatus: "CANCELLED"` stays in the list (soft-removed, e.g. by a waiter) — the UI should show it struck-through / labeled "removed", not hide it. `notes` is **staff-only, full stop** — customers can neither write it (removed from the cart/item-update payloads) nor read it. Every customer-facing endpoint and WebSocket broadcast (`GET /api/cart/{sessionToken}`, `GET /api/sessions/{sessionToken}/orders`, `GET /api/orders/{orderId}`, `/topic/table/{sessionId}`, `/topic/cart/{sessionId}`) always returns `notes: null` regardless of what staff set it to — only staff-facing views/broadcasts (`/topic/waiter`, `/topic/kitchen`, and every waiter/kitchen/cashier/admin table-detail/queue endpoint) show the real value. Set via `PATCH /api/waiter/order-items/{itemId}/note` below. `selectedOptions` is `[]` for an item with no customization selections (most items, unless the admin has configured customization groups for that menu item) — `unitPrice` already has every selection's `priceDelta` baked in, it's a single ready-to-multiply-by-quantity number, no client-side math needed.
 
 ### `BillResponse`
 ```json
@@ -73,17 +79,24 @@ An item with `itemStatus: "CANCELLED"` stays in the list (soft-removed, e.g. by 
   "subtotal": 660.00,
   "tax": 33.00,
   "discount": 0.00,
-  "total": 693.00,
+  "tip": 20.00,
+  "tipRecipientName": "Waiter One",
+  "total": 713.00,
   "paymentMethod": "CARD",
   "generatedAt": "2026-07-06T20:25:00.676478Z",
   "paidAt": "2026-07-06T20:25:00.841549Z",
+  "voidedAt": null,
+  "voidReason": null,
   "items": [
-    { "menuItemName": "Paneer Tikka", "quantity": 2, "unitPrice": 220.00, "lineTotal": 440.00 },
-    { "menuItemName": "Masala Chai", "quantity": 3, "unitPrice": 60.00, "lineTotal": 180.00 }
+    { "menuItemName": "Paneer Tikka", "quantity": 2, "unitPrice": 220.00, "lineTotal": 440.00, "customizationSummary": "Large, Extra Cheese" },
+    { "menuItemName": "Masala Chai", "quantity": 3, "unitPrice": 60.00, "lineTotal": 180.00, "customizationSummary": null }
+  ],
+  "payments": [
+    { "paymentMethod": "CARD", "amount": 713.00 }
   ]
 }
 ```
-`items` is a permanent itemized snapshot taken at generate time (name/qty/price as they were at that moment) — this is the full, self-contained receipt. It does **not** live-reference the original order, so it stays correct even though the underlying order data is deleted right after generation (see the `generate` endpoint note below).
+`items` is a permanent itemized snapshot taken at generate time (name/qty/price as they were at that moment) — this is the full, self-contained receipt. It does **not** live-reference the original order, so it stays correct even though the underlying order data is deleted right after generation (see the `generate` endpoint note below). `customizationSummary` is `null` when the item had no customization selections, otherwise a flat display string (e.g. `"Large, Extra Cheese"`) — it's for display only, not structured data. `tip`/`tipRecipientName` are decided at **generate** time now, not at payment time (see the `generate` row below) — `tip` is `0` and `tipRecipientName` is `null` unless the cashier supplied them when generating; `total` already includes the tip, no separate math needed. Payment (`pay`/`pay-split`) never touches tip fields, only `paymentMethod`/`payments`. `payments` is always populated once the bill is paid (one entry for a normal single-method payment, multiple for a split payment — see `pay-split` below) and `[]` before that. `voidedAt`/`voidReason` are both `null` unless the bill's been voided (see `void` below) — a voided bill keeps every other field exactly as it was at payment time, for audit; nothing is erased or recalculated.
 
 ### `BillRequestSummary`
 ```json
@@ -110,11 +123,34 @@ An item with `itemStatus: "CANCELLED"` stays in the list (soft-removed, e.g. by 
 {
   "id": 1, "name": "Starters",
   "items": [
-    { "id": 1, "name": "Paneer Tikka", "description": "Grilled cottage cheese skewers", "price": 220.00, "imageUrl": "https://res.cloudinary.com/.../paneer-tikka.jpg", "available": true }
+    {
+      "id": 1, "name": "Paneer Tikka", "description": "Grilled cottage cheese skewers",
+      "price": 220.00, "imageUrl": "https://res.cloudinary.com/.../paneer-tikka.jpg", "available": true,
+      "dietaryType": "VEG", "allergens": "dairy",
+      "customizationGroups": [
+        {
+          "id": 1, "name": "Portion Size", "type": "RADIO", "required": true,
+          "options": [
+            { "id": 1, "name": "Small", "priceDelta": 0.00 },
+            { "id": 2, "name": "Medium", "priceDelta": 40.00 },
+            { "id": 3, "name": "Large", "priceDelta": 80.00 }
+          ]
+        },
+        {
+          "id": 2, "name": "Add-ons", "type": "CHECKBOX", "required": false,
+          "options": [
+            { "id": 4, "name": "Extra Cheese", "priceDelta": 30.00 },
+            { "id": 5, "name": "Extra Sauce", "priceDelta": 15.00 }
+          ]
+        }
+      ]
+    }
   ]
 }
 ```
-`imageUrl` is a plain Cloudinary URL (or `null` if not set yet) — just use it directly as an `<img src>`, no special handling needed. Render a placeholder/fallback image client-side when it's `null`.
+`imageUrl` is a plain Cloudinary URL (or `null` if not set yet) — just use it directly as an `<img src>`, no special handling needed. Render a placeholder/fallback image client-side when it's `null`. `dietaryType` and `allergens` are both nullable — a `null` `dietaryType` just means it hasn't been tagged yet, don't assume `NON_VEG`. `allergens` is a free-text string (e.g. `"nuts, dairy"`), not a structured list. `customizationGroups` is `[]` for most items (only present when the admin has actually configured groups for that item) — see the "Selecting customizations at order time" note below for how to submit a selection.
+
+**Selecting customizations at order time**: when adding an item with `customizationGroups` to the cart (or when a waiter places a walk-in order — same request shape both places), pass the chosen option ids as a flat list in `selectedOptionIds`, e.g. `[3, 4]` for Large + Extra Cheese. Every `required: true` group on that item must have exactly one selection from it (409 if missing); a `RADIO` group (required or not) can have at most one selection from it (409 if two are sent); `CHECKBOX` groups accept any number, including zero. `unitPrice` in the response already reflects the base price plus every selected `priceDelta` — no client-side price math needed. Selections are fixed at add-time, same as `unitPrice` already is — there's no "change the size of an already-added item," only remove it and add it again with different selections.
 
 ### `LoginResponse` (staff)
 ```json
@@ -149,11 +185,11 @@ An item with `itemStatus: "CANCELLED"` stays in the list (soft-removed, e.g. by 
 {
   "tableId": 1, "tableNumber": "T1", "tableStatus": "OCCUPIED", "overviewStatus": "NEEDS_CONFIRMATION",
   "sessionId": 1, "pin": "0233", "openedAt": "2026-07-08T11:11:11.637435Z",
-  "participantCount": 1, "billRequested": false,
+  "participantCount": 1, "billRequested": false, "note": "anniversary table",
   "orders": [ /* OrderResponse[], every submitted order for this session — same shape as GET /api/sessions/{sessionToken}/orders */ ]
 }
 ```
-`orders` carries real `orderId`/`itemId` values — use them to call the *existing* confirm/serve/edit endpoints directly from this view (e.g. tap an item in the drill-down → `PATCH /api/waiter/order-items/{itemId}/serve`). This is read-only additive access, not a new write surface.
+`orders` carries real `orderId`/`itemId` values — use them to call the *existing* confirm/serve/edit endpoints directly from this view (e.g. tap an item in the drill-down → `PATCH /api/waiter/order-items/{itemId}/serve`). This is read-only additive access, not a new write surface. `note` is `null` unless a waiter has set one via `PATCH /api/waiter/tables/{tableId}/note` (see below) — a free-text annotation on the session, not tied to any item.
 
 ### `CashierTableDetailResponse` (cashier's drill-down — same itemized order detail as the waiter's, still no `pin`, still no participant phone numbers)
 ```json
@@ -161,11 +197,21 @@ An item with `itemStatus: "CANCELLED"` stays in the list (soft-removed, e.g. by 
   "tableId": 1, "tableNumber": "T1", "tableStatus": "OCCUPIED", "overviewStatus": "BILL_REQUESTED",
   "sessionId": 1, "openedAt": "2026-07-08T11:11:11.637435Z",
   "participantCount": 1, "billRequested": true,
-  "orderCount": 1, "estimatedTotal": 220.00,
+  "orderCount": 1, "estimatedTotal": 220.00, "note": "anniversary table",
   "orders": [ /* OrderResponse[], identical shape/content to WaiterTableDetailResponse.orders */ ]
 }
 ```
-`estimatedTotal` is a pre-tax subtotal across all non-cancelled items in the session (tax/discount aren't known until `generate` is actually called) — show it as "~₹220 (before tax)", not as a final total. `orders` carries the same real item-level detail the waiter sees (names, quantities, statuses) — the only things still withheld from the cashier are the session `pin` and participant phone numbers/names (`participantCount` stays headcount-only).
+`estimatedTotal` is a pre-tax subtotal across all non-cancelled items in the session (tax/discount aren't known until `generate` is actually called) — show it as "~₹220 (before tax)", not as a final total. `orders` carries the same real item-level detail the waiter sees (names, quantities, statuses) — the only things still withheld from the cashier are the session `pin` and participant phone numbers/names (`participantCount` stays headcount-only). `note` is read-only here — only the waiter endpoint can set it.
+
+### `KitchenTableDetailResponse` (kitchen's drill-down — same shape as waiter's minus `pin`)
+```json
+{
+  "tableId": 1, "tableNumber": "T1", "tableStatus": "OCCUPIED", "overviewStatus": "PREPARING",
+  "sessionId": 1, "openedAt": "2026-07-08T11:11:11.637435Z",
+  "participantCount": 1, "billRequested": false, "note": "anniversary table",
+  "orders": [ /* OrderResponse[] */ ]
+}
+```
 
 ### `ApiErrorResponse` (shape of every non-2xx response body)
 ```json
@@ -195,9 +241,10 @@ Always parse and surface `message` on error — don't swallow it.
 | POST | `/api/sessions/create/{qrToken}` | **`Bearer <customerToken>` required** | — | `SessionResponse` | 401 if the header is missing/invalid/expired; 409 if an order list is already active for this table; 409 if this phone number is already an active participant of a *different* session anywhere (see `/api/customers/me/session/leave`) |
 | POST | `/api/sessions/join/{qrToken}` | **`Bearer <customerToken>` required** | `{ "pin": "1234" }` | `SessionResponse` | 401 if the header is missing/invalid/expired; 404 (generic "invalid PIN or no active list") on wrong PIN or no active session; 409 if this phone number is already an active participant of a *different* session. Re-joining a session you're already (or were previously) part of always succeeds, never 409s |
 | GET | `/api/sessions/{sessionToken}/orders` | none | — | `OrderResponse[]` | Every **submitted** order for this session (all statuses except the current open `CART` draft — use `/api/cart/{sessionToken}` for that), oldest first. Call this on load/join/reconnect to hydrate a device's full order history in one shot — don't rely on having seen every WS event live, e.g. a new device joining mid-session, or a device that lost local state |
+| GET | `/api/sessions/{sessionToken}/bill` | none | — | `BillResponse` | The session's own receipt — works whether the bill's been paid yet or not, and after the session's closed. 404 if no bill has been generated for this session yet (still eating, or nothing billed at all) |
 | GET | `/api/cart/{sessionToken}` | none | — | `OrderResponse` (status `CART`) | The shared, live cart. Read-only, always works regardless of bill-request state |
-| POST | `/api/cart/{sessionToken}/items` | none | `{ "menuItemId": 1, "quantity": 2, "notes": "extra spicy" }` | `OrderResponse` | notes is optional/nullable. 409 "bill already requested" — see note below |
-| PATCH | `/api/cart/{sessionToken}/items/{itemId}` | none | `{ "quantity": 3, "notes": "..." }` | `OrderResponse` | Both fields optional — only send what changed. `quantity <= 0` deletes the item from the cart instead of setting it (same effect as `DELETE`). 409 "bill already requested" — see note below |
+| POST | `/api/cart/{sessionToken}/items` | none | `{ "menuItemId": 1, "quantity": 2, "selectedOptionIds": [3, 4] }` | `OrderResponse` | `selectedOptionIds` is optional (omit or send `[]` for an item with no customization groups) — see the customization note above `MenuItemResponse` for the selection rules. There is **no** `notes` field here anymore — customers can no longer attach a note to an item; that's staff-only now (`PATCH /api/waiter/order-items/{itemId}/note`). 409 "bill already requested" — see note below |
+| PATCH | `/api/cart/{sessionToken}/items/{itemId}` | none | `{ "quantity": 3 }` | `OrderResponse` | Quantity only — optional, only send it if it changed. `quantity <= 0` deletes the item from the cart instead of setting it (same effect as `DELETE`). No `notes` field here either, same reasoning as above. 409 "bill already requested" — see note below |
 | DELETE | `/api/cart/{sessionToken}/items/{itemId}` | none | — | `OrderResponse` | Removes from cart entirely (cart items are hard-removed, unlike waiter removals on placed orders). 409 "bill already requested" — see note below |
 | POST | `/api/cart/{sessionToken}/submit` | none | — | `OrderResponse` (now status `PLACED`) | 409 if cart is empty. A fresh empty cart is opened automatically for the same session. 409 "bill already requested" — see note below |
 | GET | `/api/orders/{orderId}` | none | — | `OrderResponse` | Poll a specific submitted order. 404 once the session's bill has been generated — the order row is deleted at that point, `BillResponse.items` (from `/api/bills/pending` etc.) is the permanent record from then on. Read-only, always works regardless of bill-request state |
@@ -219,11 +266,13 @@ Always parse and surface `message` on error — don't swallow it.
 | GET | `/api/waiter/tables/{tableId}` | — | `WaiterTableDetailResponse` | Drill-down for one table — full order/item detail. `{tableId}` is the numeric table id, not `tableNumber` |
 | POST | `/api/waiter/tables/{tableId}/request-bill` | — | 200 empty body | Same effect as the customer's `POST /api/orders/bill-request/{sessionToken}`, just keyed by `tableId` (the waiter doesn't have the customer's `sessionToken`). Same 409s apply ("already requested" / "must be served first") |
 | POST | `/api/waiter/tables/{tableId}/session` | — | `SessionResponse` | Opens a fresh order list for a table with no active session — for walk-in customers who never touch a phone. Same shape as a customer's create/join response (`sessionId`/`sessionToken`/`pin`/`qrToken`). 409 if the table already has an active session. See the walk-in note in Authentication model above — if the table's customer later scans the QR, `create` transparently attaches them to *this same* session instead of conflicting with it |
-| POST | `/api/waiter/tables/{tableId}/orders` | `{ "items": [ { "menuItemId": 1, "quantity": 2, "notes": "less spicy" } ] }` | `OrderResponse` | The waiter entering a verbal/walk-in order directly. One call places a whole round — `items` is a list, same per-item shape as `POST /api/cart/{sessionToken}/items`. Unlike the customer cart flow, this **skips `CART`/`PLACED`/confirm entirely**: the returned order is already `status: "CONFIRMED"` with every item `itemStatus: "CONFIRMED"`, and it's already visible to the kitchen — no separate confirm call needed, ever, for orders placed this way. 404 if the table has no active session (open one first via the endpoint above). 409 if the bill's already been requested for this table (same lockout as the customer cart). 404/409 per item if a `menuItemId` doesn't exist / isn't available |
+| POST | `/api/waiter/tables/{tableId}/orders` | `{ "items": [ { "menuItemId": 1, "quantity": 2, "selectedOptionIds": [3] } ] }` | `OrderResponse` | The waiter entering a verbal/walk-in order directly. One call places a whole round — `items` is a list, same per-item shape as `POST /api/cart/{sessionToken}/items` (including the same `selectedOptionIds` customization rules — a waiter walk-in order is validated exactly the same way a customer's cart-add is). Unlike the customer cart flow, this **skips `CART`/`PLACED`/confirm entirely**: the returned order is already `status: "CONFIRMED"` with every item `itemStatus: "CONFIRMED"`, and it's already visible to the kitchen — no separate confirm call needed, ever, for orders placed this way. 404 if the table has no active session (open one first via the endpoint above). 409 if the bill's already been requested for this table (same lockout as the customer cart). 404/409 per item if a `menuItemId` doesn't exist / isn't available, or if a customization selection is invalid |
+| PATCH | `/api/waiter/tables/{tableId}/note` | `{ "note": "..." }` | 200 empty body | Sets/clears a free-text note on the table's active session (e.g. "anniversary table") — not tied to any item. Shows up in the `note` field of the waiter/cashier/kitchen/admin table-detail responses. Customer-facing endpoints never expose or accept this |
 | GET | `/api/waiter/orders/pending` | — | `OrderResponse[]` | Orders with status `PLACED`, awaiting confirmation |
 | GET | `/api/waiter/orders/ready-to-serve` | — | `OrderResponse[]` | Orders with status `READY` |
 | PATCH | `/api/waiter/orders/{orderId}/confirm` | — | `OrderResponse` | `PLACED` → `CONFIRMED`, sends to kitchen |
 | PATCH | `/api/waiter/order-items/{itemId}/serve` | — | `OrderResponse` | Marks one item `SERVED` |
+| PATCH | `/api/waiter/order-items/{itemId}/note` | `{ "note": "..." }` | `OrderResponse` | Sets/clears the item's `notes` field — the **only** way it's ever set now (customers can't write it). Works at any item status, not just before confirming, e.g. "customer changed their mind about spice level" after the item's already `PREPARING` |
 | DELETE | `/api/waiter/orders/{orderId}/items/{itemId}` | — | `OrderResponse` | Soft-removes an item (→ `CANCELLED`, stays visible) — **only while the order is still `PLACED`** (before confirming), 409 otherwise |
 | PATCH | `/api/waiter/orders/{orderId}/items/{itemId}` | `{ "quantity": 3 }` | `OrderResponse` | Adjust quantity — **only while `PLACED`**, 409 otherwise. `quantity <= 0` soft-removes the item (same effect as the `DELETE` endpoint — `itemStatus` → `CANCELLED`, stays visible) instead of erroring |
 
@@ -231,8 +280,10 @@ Always parse and surface `message` on error — don't swallow it.
 
 | Method | Path | Body | Returns | Notes |
 |---|---|---|---|---|
+| GET | `/api/kitchen/tables` | — | `TableSummaryResponse[]` | Same table grid as waiter/cashier/admin — the kitchen's own table-overview page |
+| GET | `/api/kitchen/tables/{tableId}` | — | `KitchenTableDetailResponse` | Drill-down for one table — itemized orders (same shape as the waiter's), so kitchen can see everything on that table's plate at a glance. Deliberately **no** `pin` (kitchen doesn't manage session/participant access) and **no** billing fields (`estimatedTotal`/`orderCount` — cashier/admin concern). `{tableId}` is the numeric table id, not `tableNumber` |
 | GET | `/api/kitchen/queue` | — | `OrderResponse[]` | Orders with status `CONFIRMED` or `PREPARING` |
-| PATCH | `/api/kitchen/order-items/{itemId}/status` | `{ "itemStatus": "PREPARING" }` or `{ "itemStatus": "READY" }` | `OrderResponse` | Kitchen may only set these two statuses |
+| PATCH | `/api/kitchen/order-items/{itemId}/status` | `{ "itemStatus": "PREPARING" }` or `{ "itemStatus": "READY" }` | `OrderResponse` | Kitchen may only set these two statuses. Same endpoint whether the `itemId` came from the flat queue above or from the table detail view — it's one write surface, reachable two ways |
 
 ### Cashier (role `CASHIER`)
 
@@ -243,8 +294,11 @@ Always parse and surface `message` on error — don't swallow it.
 | GET | `/api/bills/requested` | — | `BillRequestSummary[]` | Sessions that have asked for the bill (order status `BILL_REQUESTED`) but don't have a generated `Bill` yet — this is the queue to work from before calling `generate` |
 | PATCH | `/api/bills/{sessionId}/revert` | — | 200 empty body | Undoes a bill request: every `BILL_REQUESTED` order in that session goes back to `SERVED` (the only state it could have come from). For "customer pressed the button by mistake" or "wants to add one more item" — the cart is independent of billing state, so a new round can just be added normally afterward. 409 if nothing is pending for that session. Pushes the reverted order(s) to `/topic/table/{sessionId}` same as any other status change |
 | GET | `/api/bills/pending` | — | `BillResponse[]` | Bills that have been generated but not yet paid |
-| POST | `/api/bills/{sessionId}/generate` | `{ "taxRatePercent": 5, "discount": 0 }` (**both required**) | `BillResponse` | `{sessionId}` here is the numeric `sessionId`, not `sessionToken`. 400 if either field is missing/null. **Works from any state where every order is `SERVED` or later** — you do **not** need to call bill-request first: if the session isn't already `BILL_REQUESTED`, `generate` transitions it there automatically before generating, in one call (still validates every order is actually `SERVED` — 409 "All orders must be served before requesting the bill" if not). This is the cashier's "generate directly" shortcut from the table-overview page — internally it's still request-then-generate, just not two separate clicks. **One-shot and final**: this call snapshots every item onto the bill (see `BillResponse.items` above), then permanently deletes the session's order/item data — there is nothing left to recompute from, so calling `generate` again for the same session 409s ("already generated"). Whether the table frees up **now** or only once paid is a server-side config toggle (`app.billing.free-table-on-generate`) — check with whoever's running the backend which mode is active |
-| PATCH | `/api/bills/{billId}/pay` | `{ "paymentMethod": "CARD" }` | `BillResponse` | Records payment. If the table wasn't already freed at generate time, this is where the session closes and the table becomes `AVAILABLE` |
+| GET | `/api/bills/waiters` | — | `StaffOptionResponse[]` (`{ "id": 1, "name": "Waiter One" }`) | Active `WAITER`-role staff only — populate the tip-recipient dropdown on the generate-bill screen with this |
+| POST | `/api/bills/{sessionId}/generate` | `{ "taxRatePercent": 5, "discount": 0, "tip"?: 20, "tipRecipientStaffId"?: 1 }` (`taxRatePercent`/`discount` **required**, `tip`/`tipRecipientStaffId` optional) | `BillResponse` | `{sessionId}` here is the numeric `sessionId`, not `sessionToken`. 400 if `taxRatePercent`/`discount` are missing/null. **The tip is decided here, at generate time — not at payment time.** `tip` omitted/`null` defaults to `0`; `total = subtotal + tax - discount + tip`. `tipRecipientStaffId` is optional and independent of `tip` (you can tip with no named recipient, or — less usefully — name a recipient with no tip); if given, 404s as "No active waiter found with id X" unless it resolves to an **active** staff account with role `WAITER` — pick the id from `GET /api/bills/waiters` above, don't let the cashier free-type it. **Works from any state where every order is `SERVED` or later** — you do **not** need to call bill-request first: if the session isn't already `BILL_REQUESTED`, `generate` transitions it there automatically before generating, in one call (still validates every order is actually `SERVED` — 409 "All orders must be served before requesting the bill" if not). This is the cashier's "generate directly" shortcut from the table-overview page — internally it's still request-then-generate, just not two separate clicks. **One-shot and final**: this call snapshots every item onto the bill (see `BillResponse.items` above), then permanently deletes the session's order/item data — there is nothing left to recompute from, so calling `generate` again for the same session 409s ("already generated"). Whether the table frees up **now** or only once paid is a server-side config toggle (`app.billing.free-table-on-generate`) — check with whoever's running the backend which mode is active |
+| PATCH | `/api/bills/{billId}/pay` | `{ "paymentMethod": "CARD" }` | `BillResponse` | Records payment for the whole bill via one method. **No `tip` field here anymore** — tip was already locked in at `generate` time (see above) and this call never touches `tip`/`tipRecipientName`/`total`. If the table wasn't already freed at generate time, this is where the session closes and the table becomes `AVAILABLE` |
+| PATCH | `/api/bills/{billId}/pay-split` | `{ "payments": [{ "paymentMethod": "CASH", "amount": 157.00 }, { "paymentMethod": "CARD", "amount": 200.00 }] }` | `BillResponse` | Same effect as `pay`, but across multiple payment methods at once. **No `tip` field here either**, same reasoning. `amount`s must add up **exactly** to the bill's total (which already includes any tip from generate time) — 409 naming the expected vs. given sum if they don't. On success `paymentMethod` on the bill itself is set to `OTHER` (there's no single representative method for a split payment) — use the `payments` array on `BillResponse` for the real breakdown |
+| PATCH | `/api/bills/{billId}/void` | `{ "reason": "..." }` | `BillResponse` | Reverses a mistaken payment — a **full void**, not a partial refund; there's no refund-amount ledger. 409 if the bill hasn't been paid yet, or has already been voided. Doesn't touch `subtotal`/`tax`/`discount`/`tip`/`total` (the historical charge stays intact for audit) and doesn't reopen the session or un-free the table — this is a payment-record correction, not an undo of the meal. A voided bill never reappears in `GET /api/bills/pending` (it was already excluded once paid) |
 
 ### Admin (`Authorization: Bearer <token>`, role `ADMIN`)
 
@@ -264,7 +318,7 @@ Admin also has full access to every Waiter and Cashier endpoint above (see the n
 | Method | Path | Body | Returns | Notes |
 |---|---|---|---|---|
 | GET | `/api/admin/tables` | — | `TableSummaryResponse[]` | Same grid as waiter/cashier |
-| GET | `/api/admin/tables/{tableId}` | — | `AdminTableDetailResponse` | Superset drill-down: `pin` + itemized `orders` + `estimatedTotal`, everything waiter and cashier separately see, in one response. Still headcount-only for participants — see `reveal-participants` below to go further |
+| GET | `/api/admin/tables/{tableId}` | — | `AdminTableDetailResponse` | Superset drill-down: `pin` + itemized `orders` + `estimatedTotal` + `note`, everything waiter and cashier separately see, in one response. Still headcount-only for participants — see `reveal-participants` below to go further |
 | POST | `/api/admin/tables/{tableId}/free-session` | `{ "pin": "1234" }` | 200 empty body | **PIN-gated override.** Force-closes the table's active session and frees the table regardless of order/participant state — the escape hatch for a genuinely stuck table. Does **not** touch order rows or generate a bill; whatever existed stays in the DB, still linked to the now-`CLOSED` session, visible afterward via `/api/admin/bills`/order history. 409 if no PIN is set yet, 401 on wrong PIN, 404 if no active session |
 | POST | `/api/admin/tables/{tableId}/reveal-participants` | `{ "pin": "1234" }` | `ParticipantResponse[]` — `{ customerId, phoneNumber, joinedAt, leftAt, isCreator }` | **PIN-gated.** The only way phone numbers are ever exposed — the normal `GET /api/admin/tables/{tableId}` above never includes them. Re-checks the PIN every single call, no caching. Includes everyone who's ever been part of the session, including those who've left |
 | GET | `/api/admin/orders/{orderId}/history` | — | `OrderStatusEventResponse[]` — `{ orderId, fromStatus, toStatus, changedByName, changedAt }` | The audit trail for one order. Works even after the order's been deleted post-billing |
@@ -312,11 +366,22 @@ Every staff member, regardless of role, manages their own profile and password h
 | POST | `/api/admin/menu/categories` | `{ pin, categories: [{ name, sortOrder? }, ...] }` | `AdminMenuCategoryResponse[]` | Create one or many categories in one PIN-gated call |
 | PATCH | `/api/admin/menu/categories/{id}` | `{ pin, name?, sortOrder? }` | `AdminMenuCategoryResponse` | Single-category rename/reorder — always PIN-gated, no exemption for categories |
 | POST | `/api/admin/menu/categories/delete` | `{ pin, categoryIds: [...] }` | 200 empty body | Bulk delete. 409 (whole batch rejected) if **any** listed category still has items — names every blocked category, not just the first, so you know exactly what to fix before retrying. Never cascade-deletes |
-| GET | `/api/admin/menu/items` | — | `AdminMenuItemResponse[]` — `{ id, categoryId, categoryName, name, description, price, imageUrl, available }` | All items, including unavailable ones |
-| POST | `/api/admin/menu/items` | `{ pin, items: [{ categoryId, name, description?, price, imageUrl?, available? }, ...] }` | `AdminMenuItemResponse[]` | Create one or many items in one PIN-gated call. `available` defaults to `true` per item |
-| PATCH | `/api/admin/menu/items/{id}` | `{ pin, categoryId?, name?, description?, price?, imageUrl? }` | `AdminMenuItemResponse` | Single-item detail edit — always PIN-gated. **Does not touch `available`** — use the dedicated endpoint below for that |
+| GET | `/api/admin/menu/items` | — | `AdminMenuItemResponse[]` — `{ id, categoryId, categoryName, name, description, price, imageUrl, available, dietaryType, allergens, customizationGroups }` | All items, including unavailable ones. `customizationGroups` is the same shape as the public menu's (see `MenuItemResponse` above) |
+| POST | `/api/admin/menu/items` | `{ pin, items: [{ categoryId, name, description?, price, imageUrl?, available?, dietaryType?, allergens? }, ...] }` | `AdminMenuItemResponse[]` | Create one or many items in one PIN-gated call. `available` defaults to `true` per item; `dietaryType`/`allergens` are both optional |
+| PATCH | `/api/admin/menu/items/{id}` | `{ pin, categoryId?, name?, description?, price?, imageUrl?, dietaryType?, allergens? }` | `AdminMenuItemResponse` | Single-item detail edit — always PIN-gated. **Does not touch `available`** — use the dedicated endpoint below for that |
 | PATCH | `/api/admin/menu/items/{id}/availability` | `{ "available": true\|false }` | `AdminMenuItemResponse` | **The one PIN-free admin write action** — toggling an item on/off is frequent, low-risk, and fully reversible, so it's split into its own endpoint specifically so it never needs the PIN, regardless of what else you're doing |
 | POST | `/api/admin/menu/items/delete` | `{ pin, itemIds: [...] }` | 200 empty body | Bulk delete. 409 (whole batch rejected) if **any** listed item is part of an in-progress order — names every blocked item; mark those unavailable instead via the endpoint above. Past bills are never affected either way (`BillLineItem` is a permanent name/price snapshot, no FK to `MenuItem`) |
+
+**Menu item customization** (portion size / add-ons, Swiggy-style) — all PIN-gated, all batch-create/delete following the same conventions as everything else in this section:
+
+| Method | Path | Body | Returns | Notes |
+|---|---|---|---|---|
+| POST | `/api/admin/menu/items/{itemId}/customization-groups` | `{ pin, groups: [{ name, type, required, options: [{ name, priceDelta }, ...] }, ...] }` | `CustomizationGroupResponse[]` — `{ id, name, type, required, options: [{ id, name, priceDelta }, ...] }` | Create one or many groups for one item in a single call, each with its initial options. `type` is `RADIO` or `CHECKBOX`; `required` only really matters for `RADIO` groups (a required `CHECKBOX` group is unusual but not blocked) |
+| PATCH | `/api/admin/menu/customization-groups/{groupId}` | `{ pin, name?, type?, required? }` | `CustomizationGroupResponse` | Single-group edit |
+| POST | `/api/admin/menu/customization-groups/delete` | `{ pin, groupIds: [...] }` | 200 empty body | Bulk delete — cascades to the group's options. No "in use" guard needed (unlike deleting a menu item/category): past orders keep a permanent snapshot of what was selected (`OrderItemResponse.selectedOptions`, `BillLineItem.customizationSummary`), so deleting the live group never rewrites history |
+| POST | `/api/admin/menu/customization-groups/{groupId}/options` | `{ pin, options: [{ name, priceDelta }, ...] }` | `CustomizationOptionResponse[]` — `{ id, name, priceDelta }` | Add one or many options to an existing group |
+| PATCH | `/api/admin/menu/customization-options/{optionId}` | `{ pin, name?, priceDelta? }` | `CustomizationOptionResponse` | Single-option edit |
+| POST | `/api/admin/menu/customization-options/delete` | `{ pin, optionIds: [...] }` | 200 empty body | Bulk delete, same no-guard reasoning as group deletion above |
 
 **Analytics:** all three take optional `from`/`to` (ISO instant) query params, defaulting to all-time when omitted.
 
@@ -339,7 +404,7 @@ Connect: `new SockJS('http://localhost:8080/ws')` wrapped in a STOMP client (e.g
 | `/topic/cashier` | `CashierNotice` — `{ event: "BILL_REQUESTED"\|"BILL_REQUEST_REVERTED"\|"BILL_GENERATED"\|"BILL_PAID", tableSessionId, tableNumber, bill: BillResponse\|null }` | Cashier dashboard | Bill requested / reverted / generated / paid. `bill` is only non-null for the generated/paid events |
 | `/topic/table/{sessionId}` | `OrderResponse` | Customer app (this specific session) | Any status change on one of this session's orders — waiter confirms, kitchen progresses, waiter edits a still-`PLACED` order, cashier reverts a bill request. Stops firing once the bill is generated (nothing left to push status updates about) — the frontend should treat this as the natural end of a visit, not a dropped connection |
 | `/topic/cart/{sessionId}` | `OrderResponse` (status `CART`) | Customer app (this specific session) | Any participant adds/edits/removes a cart item, or a fresh cart opens after submit |
-| `/topic/tables` | `TableSummaryResponse` | Waiter/cashier/admin table-overview page | **One table's** summary changed — fires on session create/join/leave, cart submit, order confirm, item status change (kitchen progress, waiter serve), and any bill-request/generate/revert/pay/free-session. Not scoped per table — every connected waiter/cashier/admin screen subscribes to this single shared topic and swaps out just the one tile matching the incoming `tableId`. This is a single global channel, unlike the other topics above which are per-session |
+| `/topic/tables` | `TableSummaryResponse` | Waiter/kitchen/cashier/admin table-overview page | **One table's** summary changed — fires on session create/join/leave, cart submit, order confirm, item status change (kitchen progress, waiter serve), and any bill-request/generate/revert/pay/free-session. Not scoped per table — every connected waiter/kitchen/cashier/admin screen subscribes to this single shared topic and swaps out just the one tile matching the incoming `tableId`. This is a single global channel, unlike the other topics above which are per-session |
 
 `{sessionId}` in the topic path is the **numeric** `sessionId` field from `SessionResponse`, not the `sessionToken` string. `/topic/tables` has no `{sessionId}`/`{tableId}` in its path — it's one topic for the whole restaurant, and each message payload carries its own `tableId` for the client to match against.
 

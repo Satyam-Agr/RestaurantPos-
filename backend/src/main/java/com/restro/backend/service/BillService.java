@@ -2,17 +2,23 @@ package com.restro.backend.service;
 
 import com.restro.backend.domain.*;
 import com.restro.backend.dto.BillLineItemResponse;
+import com.restro.backend.dto.BillPaymentResponse;
 import com.restro.backend.dto.BillRequestSummary;
 import com.restro.backend.dto.BillResponse;
 import com.restro.backend.dto.CashierNotice;
 import com.restro.backend.dto.GenerateBillRequest;
 import com.restro.backend.dto.OrderResponse;
 import com.restro.backend.dto.PayBillRequest;
+import com.restro.backend.dto.PaySplitBillRequest;
+import com.restro.backend.dto.PaymentEntryRequest;
+import com.restro.backend.dto.StaffOptionResponse;
+import com.restro.backend.dto.VoidBillRequest;
 import com.restro.backend.exception.ConflictException;
 import com.restro.backend.exception.NotFoundException;
 import com.restro.backend.repository.BillRepository;
 import com.restro.backend.repository.CustomerOrderRepository;
 import com.restro.backend.repository.RestaurantTableRepository;
+import com.restro.backend.repository.StaffUserRepository;
 import com.restro.backend.repository.TableSessionRepository;
 import com.restro.backend.ws.OrderEventBroadcaster;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +44,7 @@ public class BillService {
     private final RestaurantTableRepository restaurantTableRepository;
     private final CustomerOrderRepository customerOrderRepository;
     private final BillRepository billRepository;
+    private final StaffUserRepository staffUserRepository;
     private final OrderService orderService;
     private final SessionService sessionService;
     private final TableOverviewService tableOverviewService;
@@ -114,7 +121,7 @@ public class BillService {
             order.setStatus(OrderStatus.SERVED);
             customerOrderRepository.save(order);
             orderService.logEvent(order, OrderStatus.BILL_REQUESTED, OrderStatus.SERVED, cashier);
-            broadcaster.notifyTable(session.getId(), orderMapper.toResponse(order));
+            broadcaster.notifyTable(session.getId(), orderMapper.toCustomerResponse(order));
         }
 
         broadcaster.notifyCashier(new CashierNotice("BILL_REQUEST_REVERTED", session.getId(), session.getTable().getTableNumber(), null));
@@ -146,22 +153,35 @@ public class BillService {
 
         BigDecimal tax = subtotal.multiply(request.taxRatePercent()).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
         BigDecimal discount = request.discount();
-        BigDecimal total = subtotal.add(tax).subtract(discount);
+        BigDecimal tip = request.tip() != null ? request.tip() : BigDecimal.ZERO;
+        BigDecimal total = subtotal.add(tax).subtract(discount).add(tip);
+
+        StaffUser tipRecipient = null;
+        if (request.tipRecipientStaffId() != null) {
+            tipRecipient = staffUserRepository.findById(request.tipRecipientStaffId())
+                    .filter(s -> s.getRole() == StaffRole.WAITER && s.isActive())
+                    .orElseThrow(() -> new NotFoundException("No active waiter found with id " + request.tipRecipientStaffId()));
+        }
 
         Bill bill = billRepository.findByTableSessionAndPaidAtIsNull(session).orElseGet(Bill::new);
         bill.setTableSession(session);
         bill.setSubtotal(subtotal);
         bill.setTax(tax);
         bill.setDiscount(discount);
+        bill.setTip(tip);
+        bill.setTipRecipient(tipRecipient);
         bill.setTotal(total);
         bill.setGeneratedAt(Instant.now());
         for (OrderItem item : billableItems) {
+            String customizationSummary = item.getSelectedOptions().isEmpty() ? null
+                    : item.getSelectedOptions().stream().map(OrderItemSelectedOption::getOptionName).collect(Collectors.joining(", "));
             bill.getLineItems().add(BillLineItem.builder()
                     .bill(bill)
                     .menuItemName(item.getMenuItem().getName())
                     .quantity(item.getQuantity())
                     .unitPrice(item.getUnitPrice())
                     .lineTotal(item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
+                    .customizationSummary(customizationSummary)
                     .build());
         }
         bill = billRepository.save(bill);
@@ -181,13 +201,74 @@ public class BillService {
 
     @Transactional
     public BillResponse payBill(Long billId, PayBillRequest request, StaffUser cashier) {
+        Bill bill = requirePayableBill(billId);
+
+        bill.setPaymentMethod(request.paymentMethod());
+        bill.getPayments().add(BillPayment.builder()
+                .bill(bill)
+                .paymentMethod(request.paymentMethod())
+                .amount(bill.getTotal())
+                .recordedAt(Instant.now())
+                .build());
+
+        return finalizePayment(bill, cashier);
+    }
+
+    @Transactional
+    public BillResponse payBillSplit(Long billId, PaySplitBillRequest request, StaffUser cashier) {
+        Bill bill = requirePayableBill(billId);
+
+        BigDecimal sum = request.payments().stream().map(PaymentEntryRequest::amount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (sum.compareTo(bill.getTotal()) != 0) {
+            throw new ConflictException("Payment amounts must add up to the bill total — expected " + bill.getTotal() + ", got " + sum);
+        }
+
+        bill.setPaymentMethod(PaymentMethod.OTHER);
+        for (PaymentEntryRequest entry : request.payments()) {
+            bill.getPayments().add(BillPayment.builder()
+                    .bill(bill)
+                    .paymentMethod(entry.paymentMethod())
+                    .amount(entry.amount())
+                    .recordedAt(Instant.now())
+                    .build());
+        }
+
+        return finalizePayment(bill, cashier);
+    }
+
+    @Transactional
+    public BillResponse voidBill(Long billId, VoidBillRequest request, StaffUser cashier) {
+        Bill bill = billRepository.findById(billId)
+                .orElseThrow(() -> new NotFoundException("Bill " + billId + " not found"));
+        if (bill.getPaidAt() == null) {
+            throw new ConflictException("Bill " + billId + " hasn't been paid yet — nothing to void");
+        }
+        if (bill.getVoidedAt() != null) {
+            throw new ConflictException("Bill " + billId + " has already been voided");
+        }
+
+        bill.setVoidedAt(Instant.now());
+        bill.setVoidedBy(cashier);
+        bill.setVoidReason(request.reason());
+        billRepository.save(bill);
+
+        BillResponse response = toResponse(bill);
+        TableSession session = bill.getTableSession();
+        broadcaster.notifyCashier(new CashierNotice("BILL_VOIDED", session.getId(), session.getTable().getTableNumber(), response));
+        return response;
+    }
+
+    private Bill requirePayableBill(Long billId) {
         Bill bill = billRepository.findById(billId)
                 .orElseThrow(() -> new NotFoundException("Bill " + billId + " not found"));
         if (bill.getPaidAt() != null) {
             throw new ConflictException("Bill " + billId + " is already paid");
         }
+        return bill;
+    }
 
-        bill.setPaymentMethod(request.paymentMethod());
+    // Shared tail for both the single-method and split-payment paths.
+    private BillResponse finalizePayment(Bill bill, StaffUser cashier) {
         bill.setClosedBy(cashier);
         bill.setPaidAt(Instant.now());
         billRepository.save(bill);
@@ -215,9 +296,28 @@ public class BillService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<StaffOptionResponse> listTipEligibleWaiters() {
+        return staffUserRepository.findAllByRoleAndActiveTrue(StaffRole.WAITER).stream()
+                .map(s -> new StaffOptionResponse(s.getId(), s.getName()))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public BillResponse getBillForSession(String sessionToken) {
+        TableSession session = tableSessionRepository.findBySessionToken(sessionToken)
+                .orElseThrow(() -> new NotFoundException("Session not found"));
+        Bill bill = billRepository.findByTableSession(session)
+                .orElseThrow(() -> new NotFoundException("No bill has been generated for this session yet"));
+        return toResponse(bill);
+    }
+
     private BillResponse toResponse(Bill bill) {
         List<BillLineItemResponse> items = bill.getLineItems().stream()
-                .map(li -> new BillLineItemResponse(li.getMenuItemName(), li.getQuantity(), li.getUnitPrice(), li.getLineTotal()))
+                .map(li -> new BillLineItemResponse(li.getMenuItemName(), li.getQuantity(), li.getUnitPrice(), li.getLineTotal(), li.getCustomizationSummary()))
+                .toList();
+        List<BillPaymentResponse> payments = bill.getPayments().stream()
+                .map(p -> new BillPaymentResponse(p.getPaymentMethod(), p.getAmount()))
                 .toList();
         return new BillResponse(
                 bill.getId(),
@@ -226,11 +326,16 @@ public class BillService {
                 bill.getSubtotal(),
                 bill.getTax(),
                 bill.getDiscount(),
+                bill.getTip() != null ? bill.getTip() : BigDecimal.ZERO,
+                bill.getTipRecipient() != null ? bill.getTipRecipient().getName() : null,
                 bill.getTotal(),
                 bill.getPaymentMethod(),
                 bill.getGeneratedAt(),
                 bill.getPaidAt(),
-                items
+                bill.getVoidedAt(),
+                bill.getVoidReason(),
+                items,
+                payments
         );
     }
 }

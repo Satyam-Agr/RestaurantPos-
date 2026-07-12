@@ -6,6 +6,8 @@ import com.restro.backend.dto.OrderResponse;
 import com.restro.backend.exception.ConflictException;
 import com.restro.backend.exception.NotFoundException;
 import com.restro.backend.repository.CustomerOrderRepository;
+import com.restro.backend.repository.CustomizationGroupRepository;
+import com.restro.backend.repository.CustomizationOptionRepository;
 import com.restro.backend.repository.MenuItemRepository;
 import com.restro.backend.repository.OrderItemRepository;
 import com.restro.backend.repository.OrderStatusEventRepository;
@@ -16,8 +18,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -29,6 +34,8 @@ public class OrderService {
     private final RestaurantTableRepository restaurantTableRepository;
     private final TableSessionRepository tableSessionRepository;
     private final MenuItemRepository menuItemRepository;
+    private final CustomizationGroupRepository customizationGroupRepository;
+    private final CustomizationOptionRepository customizationOptionRepository;
     private final TableOverviewService tableOverviewService;
     private final OrderMapper orderMapper;
     private final OrderEventBroadcaster broadcaster;
@@ -40,7 +47,7 @@ public class OrderService {
 
     @Transactional(readOnly = true)
     public OrderResponse getOrder(Long orderId) {
-        return orderMapper.toResponse(getOrderEntity(orderId));
+        return orderMapper.toCustomerResponse(getOrderEntity(orderId));
     }
 
     @Transactional
@@ -61,7 +68,7 @@ public class OrderService {
 
         OrderResponse response = orderMapper.toResponse(order);
         broadcaster.notifyKitchen(response);
-        broadcaster.notifyTable(order.getTableSession().getId(), response);
+        broadcaster.notifyTable(order.getTableSession().getId(), orderMapper.toCustomerResponse(order));
         tableOverviewService.refreshAndBroadcast(order.getTableSession());
         return response;
     }
@@ -94,14 +101,7 @@ public class OrderService {
             if (!menuItem.isAvailable()) {
                 throw new ConflictException("Menu item '" + menuItem.getName() + "' is currently unavailable");
             }
-            order.getItems().add(OrderItem.builder()
-                    .order(order)
-                    .menuItem(menuItem)
-                    .quantity(itemRequest.quantity())
-                    .unitPrice(menuItem.getPrice())
-                    .notes(itemRequest.notes())
-                    .itemStatus(ItemStatus.CONFIRMED)
-                    .build());
+            order.getItems().add(buildOrderItem(order, menuItem, itemRequest.quantity(), itemRequest.selectedOptionIds(), ItemStatus.CONFIRMED));
         }
 
         customerOrderRepository.save(order);
@@ -109,7 +109,7 @@ public class OrderService {
 
         OrderResponse response = orderMapper.toResponse(order);
         broadcaster.notifyKitchen(response);
-        broadcaster.notifyTable(session.getId(), response);
+        broadcaster.notifyTable(session.getId(), orderMapper.toCustomerResponse(order));
         tableOverviewService.refreshAndBroadcast(session);
         return response;
     }
@@ -139,7 +139,7 @@ public class OrderService {
         if(order.getStatus().equals(OrderStatus.READY)) {
             broadcaster.notifyWaiter(response);
         }
-        broadcaster.notifyTable(order.getTableSession().getId(), response);
+        broadcaster.notifyTable(order.getTableSession().getId(), orderMapper.toCustomerResponse(order));
         tableOverviewService.refreshAndBroadcast(order.getTableSession());
         return response;
     }
@@ -162,7 +162,23 @@ public class OrderService {
 
         OrderResponse response = orderMapper.toResponse(item.getOrder());
         broadcaster.notifyWaiter(response);
-        broadcaster.notifyTable(item.getOrder().getTableSession().getId(), response);
+        broadcaster.notifyTable(item.getOrder().getTableSession().getId(), orderMapper.toCustomerResponse(item.getOrder()));
+        return response;
+    }
+
+    // Staff-only annotation on an already-placed item (e.g. "customer changed their mind about spice level") —
+    // settable at any status, unlike quantity edits which are locked to PLACED. Never customer-writable.
+    @Transactional
+    public OrderResponse setItemNote(Long orderItemId, String note, StaffUser staff) {
+        OrderItem item = orderItemRepository.findById(orderItemId)
+                .orElseThrow(() -> new NotFoundException("Order item " + orderItemId + " not found"));
+        item.setNotes(note);
+        orderItemRepository.save(item);
+
+        OrderResponse response = orderMapper.toResponse(item.getOrder());
+        broadcaster.notifyKitchen(response);
+        broadcaster.notifyWaiter(response);
+        broadcaster.notifyTable(item.getOrder().getTableSession().getId(), orderMapper.toCustomerResponse(item.getOrder()));
         return response;
     }
 
@@ -211,6 +227,61 @@ public class OrderService {
             return OrderStatus.CONFIRMED;
         }
         return OrderStatus.PLACED;
+    }
+
+    // Shared by the customer cart flow (CartService.addItem) and the waiter walk-in flow (createStaffOrder)
+    // above — one place owns "what does it mean to add this menu item with these selections."
+    OrderItem buildOrderItem(CustomerOrder order, MenuItem menuItem, int quantity, List<Long> selectedOptionIds, ItemStatus itemStatus) {
+        List<CustomizationOption> selections = resolveAndValidateSelections(menuItem, selectedOptionIds);
+        BigDecimal unitPrice = menuItem.getPrice().add(
+                selections.stream().map(CustomizationOption::getPriceDelta).reduce(BigDecimal.ZERO, BigDecimal::add)
+        );
+
+        OrderItem item = OrderItem.builder()
+                .order(order)
+                .menuItem(menuItem)
+                .quantity(quantity)
+                .unitPrice(unitPrice)
+                .itemStatus(itemStatus)
+                .build();
+
+        for (CustomizationOption option : selections) {
+            item.getSelectedOptions().add(OrderItemSelectedOption.builder()
+                    .orderItem(item)
+                    .groupName(option.getGroup().getName())
+                    .optionName(option.getName())
+                    .priceDelta(option.getPriceDelta())
+                    .build());
+        }
+        return item;
+    }
+
+    private List<CustomizationOption> resolveAndValidateSelections(MenuItem menuItem, List<Long> selectedOptionIds) {
+        List<Long> ids = selectedOptionIds != null ? selectedOptionIds : List.of();
+        List<CustomizationOption> selected = ids.isEmpty() ? List.of() : customizationOptionRepository.findAllById(ids);
+        if (selected.size() != ids.size()) {
+            throw new NotFoundException("One or more selected options were not found");
+        }
+        for (CustomizationOption option : selected) {
+            if (!option.getGroup().getMenuItem().getId().equals(menuItem.getId())) {
+                throw new ConflictException("Option '" + option.getName() + "' doesn't belong to '" + menuItem.getName() + "'");
+            }
+        }
+
+        Map<Long, List<CustomizationOption>> selectedByGroup = selected.stream()
+                .collect(Collectors.groupingBy(o -> o.getGroup().getId()));
+
+        for (CustomizationGroup group : customizationGroupRepository.findAllByMenuItemOrderBySortOrderAsc(menuItem)) {
+            int count = selectedByGroup.getOrDefault(group.getId(), List.of()).size();
+            if (group.isRequired() && count == 0) {
+                throw new ConflictException("'" + group.getName() + "' is required for '" + menuItem.getName() + "'");
+            }
+            if (group.getType() == CustomizationType.RADIO && count > 1) {
+                throw new ConflictException("Only one option can be selected for '" + group.getName() + "'");
+            }
+        }
+
+        return selected;
     }
 
     CustomerOrder getOrderEntity(Long orderId) {

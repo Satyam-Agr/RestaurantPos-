@@ -4,9 +4,17 @@ import com.restro.backend.dto.AdminMenuCategoryResponse;
 import com.restro.backend.dto.AdminMenuItemResponse;
 import com.restro.backend.dto.CategoryIdsRequest;
 import com.restro.backend.dto.CreateCategoriesBatchRequest;
+import com.restro.backend.dto.CreateCustomizationGroupsBatchRequest;
+import com.restro.backend.dto.CreateCustomizationOptionsBatchRequest;
 import com.restro.backend.dto.CreateMenuItemsBatchRequest;
+import com.restro.backend.dto.CustomizationGroupIdsRequest;
+import com.restro.backend.dto.CustomizationGroupResponse;
+import com.restro.backend.dto.CustomizationOptionIdsRequest;
+import com.restro.backend.dto.CustomizationOptionResponse;
 import com.restro.backend.dto.ItemIdsRequest;
 import com.restro.backend.dto.UpdateCategoryRequest;
+import com.restro.backend.dto.UpdateCustomizationGroupRequest;
+import com.restro.backend.dto.UpdateCustomizationOptionRequest;
 import com.restro.backend.dto.UpdateItemAvailabilityRequest;
 import com.restro.backend.dto.UpdateMenuItemRequest;
 import com.restro.backend.security.StaffUserDetails;
@@ -82,5 +90,57 @@ public class AdminMenuController {
     @PostMapping("/items/delete")
     public void deleteItems(@Valid @RequestBody ItemIdsRequest request, @AuthenticationPrincipal StaffUserDetails principal) {
         adminMenuService.deleteItems(request, principal.staffUser());
+    }
+
+    @PostMapping("/items/{itemId}/customization-groups")
+    public List<CustomizationGroupResponse> createCustomizationGroups(
+            @PathVariable Long itemId,
+            @Valid @RequestBody CreateCustomizationGroupsBatchRequest request,
+            @AuthenticationPrincipal StaffUserDetails principal
+    ) {
+        return adminMenuService.createCustomizationGroups(itemId, request, principal.staffUser());
+    }
+
+    @PatchMapping("/customization-groups/{groupId}")
+    public CustomizationGroupResponse updateCustomizationGroup(
+            @PathVariable Long groupId,
+            @Valid @RequestBody UpdateCustomizationGroupRequest request,
+            @AuthenticationPrincipal StaffUserDetails principal
+    ) {
+        return adminMenuService.updateCustomizationGroup(groupId, request, principal.staffUser());
+    }
+
+    @PostMapping("/customization-groups/delete")
+    public void deleteCustomizationGroups(
+            @Valid @RequestBody CustomizationGroupIdsRequest request,
+            @AuthenticationPrincipal StaffUserDetails principal
+    ) {
+        adminMenuService.deleteCustomizationGroups(request, principal.staffUser());
+    }
+
+    @PostMapping("/customization-groups/{groupId}/options")
+    public List<CustomizationOptionResponse> createCustomizationOptions(
+            @PathVariable Long groupId,
+            @Valid @RequestBody CreateCustomizationOptionsBatchRequest request,
+            @AuthenticationPrincipal StaffUserDetails principal
+    ) {
+        return adminMenuService.createCustomizationOptions(groupId, request, principal.staffUser());
+    }
+
+    @PatchMapping("/customization-options/{optionId}")
+    public CustomizationOptionResponse updateCustomizationOption(
+            @PathVariable Long optionId,
+            @Valid @RequestBody UpdateCustomizationOptionRequest request,
+            @AuthenticationPrincipal StaffUserDetails principal
+    ) {
+        return adminMenuService.updateCustomizationOption(optionId, request, principal.staffUser());
+    }
+
+    @PostMapping("/customization-options/delete")
+    public void deleteCustomizationOptions(
+            @Valid @RequestBody CustomizationOptionIdsRequest request,
+            @AuthenticationPrincipal StaffUserDetails principal
+    ) {
+        adminMenuService.deleteCustomizationOptions(request, principal.staffUser());
     }
 }

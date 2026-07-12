@@ -6,6 +6,7 @@ public record BillLineItemResponse(
         String menuItemName,
         int quantity,
         BigDecimal unitPrice,
-        BigDecimal lineTotal
+        BigDecimal lineTotal,
+        String customizationSummary
 ) {
 }

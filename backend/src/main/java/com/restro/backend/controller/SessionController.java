@@ -1,11 +1,13 @@
 package com.restro.backend.controller;
 
+import com.restro.backend.dto.BillResponse;
 import com.restro.backend.dto.JoinSessionRequest;
 import com.restro.backend.dto.OrderResponse;
 import com.restro.backend.dto.SessionResponse;
 import com.restro.backend.dto.SessionStatusResponse;
 import com.restro.backend.security.CustomerPrincipal;
 import com.restro.backend.security.CustomerTokenService;
+import com.restro.backend.service.BillService;
 import com.restro.backend.service.SessionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,7 @@ import java.util.List;
 public class SessionController {
 
     private final SessionService sessionService;
+    private final BillService billService;
     private final CustomerTokenService customerTokenService;
 
     @GetMapping("/status/{qrToken}")
@@ -29,6 +32,11 @@ public class SessionController {
     @GetMapping("/{sessionToken}/orders")
     public List<OrderResponse> getOrders(@PathVariable String sessionToken) {
         return sessionService.getOrders(sessionToken);
+    }
+
+    @GetMapping("/{sessionToken}/bill")
+    public BillResponse getBill(@PathVariable String sessionToken) {
+        return billService.getBillForSession(sessionToken);
     }
 
     @PostMapping("/create/{qrToken}")

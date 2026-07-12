@@ -13,10 +13,15 @@ public record BillResponse(
         BigDecimal subtotal,
         BigDecimal tax,
         BigDecimal discount,
+        BigDecimal tip,
+        String tipRecipientName,
         BigDecimal total,
         PaymentMethod paymentMethod,
         Instant generatedAt,
         Instant paidAt,
-        List<BillLineItemResponse> items
+        Instant voidedAt,
+        String voidReason,
+        List<BillLineItemResponse> items,
+        List<BillPaymentResponse> payments
 ) {
 }

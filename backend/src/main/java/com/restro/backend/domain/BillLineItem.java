@@ -35,4 +35,8 @@ public class BillLineItem {
 
     @Column(name = "line_total", nullable = false, precision = 10, scale = 2)
     private BigDecimal lineTotal;
+
+    // Flat display string, e.g. "Large, Extra Cheese" — built at generate time from the order item's selections.
+    @Column(name = "customization_summary")
+    private String customizationSummary;
 }

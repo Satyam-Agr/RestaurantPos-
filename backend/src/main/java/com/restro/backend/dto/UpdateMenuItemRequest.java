@@ -1,5 +1,6 @@
 package com.restro.backend.dto;
 
+import com.restro.backend.domain.DietaryType;
 import jakarta.validation.constraints.NotBlank;
 
 import java.math.BigDecimal;
@@ -10,6 +11,8 @@ public record UpdateMenuItemRequest(
         String name,
         String description,
         BigDecimal price,
-        String imageUrl
+        String imageUrl,
+        DietaryType dietaryType,
+        String allergens
 ) {
 }

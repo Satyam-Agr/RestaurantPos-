@@ -146,6 +146,18 @@ public class SessionService {
     }
 
     @Transactional
+    public void setTableNote(Long tableId, String note) {
+        RestaurantTable table = restaurantTableRepository.findById(tableId)
+                .orElseThrow(() -> new NotFoundException("Table " + tableId + " not found"));
+        TableSession session = tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE)
+                .orElseThrow(() -> new NotFoundException("No active session for this table"));
+
+        session.setNote(note);
+        tableSessionRepository.save(session);
+        tableOverviewService.refreshAndBroadcast(session);
+    }
+
+    @Transactional
     public SessionResponse joinSession(String qrToken, String pin, Long customerId) {
         RestaurantTable table = restaurantTableRepository.findByQrToken(qrToken)
                 .orElseThrow(() -> new NotFoundException("No table found for this QR code"));
@@ -218,7 +230,7 @@ public class SessionService {
         return customerOrderRepository
                 .findAllByTableSessionAndStatusNotInOrderByPlacedAtAsc(session, List.of(OrderStatus.CART))
                 .stream()
-                .map(orderMapper::toResponse)
+                .map(orderMapper::toCustomerResponse)
                 .toList();
     }
 

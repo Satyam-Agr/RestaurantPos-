@@ -1,5 +1,6 @@
 package com.restro.backend.dto;
 
+import com.restro.backend.domain.DietaryType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
@@ -11,6 +12,8 @@ public record CreateMenuItemRequest(
         String description,
         @NotNull BigDecimal price,
         String imageUrl,
-        Boolean available
+        Boolean available,
+        DietaryType dietaryType,
+        String allergens
 ) {
 }

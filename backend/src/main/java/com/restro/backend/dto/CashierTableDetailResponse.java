@@ -18,6 +18,7 @@ public record CashierTableDetailResponse(
         Boolean billRequested,
         Integer orderCount,
         BigDecimal estimatedTotal,
+        String note,
         List<OrderResponse> orders
 ) {
 }

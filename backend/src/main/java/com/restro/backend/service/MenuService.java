@@ -1,9 +1,13 @@
 package com.restro.backend.service;
 
+import com.restro.backend.domain.CustomizationGroup;
 import com.restro.backend.domain.MenuCategory;
 import com.restro.backend.domain.MenuItem;
+import com.restro.backend.dto.CustomizationGroupResponse;
+import com.restro.backend.dto.CustomizationOptionResponse;
 import com.restro.backend.dto.MenuCategoryResponse;
 import com.restro.backend.dto.MenuItemResponse;
+import com.restro.backend.repository.CustomizationGroupRepository;
 import com.restro.backend.repository.MenuCategoryRepository;
 import com.restro.backend.repository.MenuItemRepository;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +24,7 @@ public class MenuService {
 
     private final MenuCategoryRepository menuCategoryRepository;
     private final MenuItemRepository menuItemRepository;
+    private final CustomizationGroupRepository customizationGroupRepository;
 
     @Transactional(readOnly = true)
     public List<MenuCategoryResponse> getMenu() {
@@ -39,6 +44,17 @@ public class MenuService {
     }
 
     private MenuItemResponse toItemResponse(MenuItem item) {
-        return new MenuItemResponse(item.getId(), item.getName(), item.getDescription(), item.getPrice(), item.getImageUrl(), item.isAvailable());
+        List<CustomizationGroupResponse> groups = customizationGroupRepository.findAllByMenuItemOrderBySortOrderAsc(item).stream()
+                .map(this::toGroupResponse)
+                .toList();
+        return new MenuItemResponse(item.getId(), item.getName(), item.getDescription(), item.getPrice(), item.getImageUrl(),
+                item.isAvailable(), item.getDietaryType(), item.getAllergens(), groups);
+    }
+
+    private CustomizationGroupResponse toGroupResponse(CustomizationGroup group) {
+        List<CustomizationOptionResponse> options = group.getOptions().stream()
+                .map(o -> new CustomizationOptionResponse(o.getId(), o.getName(), o.getPriceDelta()))
+                .toList();
+        return new CustomizationGroupResponse(group.getId(), group.getName(), group.getType(), group.isRequired(), options);
     }
 }

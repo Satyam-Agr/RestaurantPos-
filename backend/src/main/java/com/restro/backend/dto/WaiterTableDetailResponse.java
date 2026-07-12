@@ -16,6 +16,7 @@ public record WaiterTableDetailResponse(
         Instant openedAt,
         Integer participantCount,
         Boolean billRequested,
+        String note,
         List<OrderResponse> orders
 ) {
 }

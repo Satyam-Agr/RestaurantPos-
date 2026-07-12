@@ -48,12 +48,13 @@ public class TableOverviewService {
         TableSummaryResponse summary = toSummary(table, session);
 
         String pin = session.map(TableSession::getPin).orElse(null);
+        String note = session.map(TableSession::getNote).orElse(null);
         List<OrderResponse> orders = fetchOrders(session);
 
         return new WaiterTableDetailResponse(
                 summary.tableId(), summary.tableNumber(), summary.tableStatus(), summary.overviewStatus(),
                 summary.sessionId(), pin, summary.openedAt(), summary.participantCount(), summary.billRequested(),
-                orders
+                note, orders
         );
     }
 
@@ -66,12 +67,13 @@ public class TableOverviewService {
         int orderCount = session.map(s -> customerOrderRepository.findAllByTableSessionAndStatusNotIn(s, BILLABLE_STATUSES).size())
                 .orElse(0);
         BigDecimal estimatedTotal = session.map(this::calculateSubtotal).orElse(null);
+        String note = session.map(TableSession::getNote).orElse(null);
         List<OrderResponse> orders = fetchOrders(session);
 
         return new CashierTableDetailResponse(
                 summary.tableId(), summary.tableNumber(), summary.tableStatus(), summary.overviewStatus(),
                 summary.sessionId(), summary.openedAt(), summary.participantCount(), summary.billRequested(),
-                orderCount, estimatedTotal, orders
+                orderCount, estimatedTotal, note, orders
         );
     }
 
@@ -83,12 +85,29 @@ public class TableOverviewService {
 
         String pin = session.map(TableSession::getPin).orElse(null);
         BigDecimal estimatedTotal = session.map(this::calculateSubtotal).orElse(null);
+        String note = session.map(TableSession::getNote).orElse(null);
         List<OrderResponse> orders = fetchOrders(session);
 
         return new AdminTableDetailResponse(
                 summary.tableId(), summary.tableNumber(), summary.tableStatus(), summary.overviewStatus(),
                 summary.sessionId(), pin, summary.openedAt(), summary.participantCount(), summary.billRequested(),
-                estimatedTotal, orders
+                estimatedTotal, note, orders
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public KitchenTableDetailResponse getKitchenDetail(Long tableId) {
+        RestaurantTable table = requireTable(tableId);
+        Optional<TableSession> session = tableSessionRepository.findByTableAndStatus(table, SessionStatus.ACTIVE);
+        TableSummaryResponse summary = toSummary(table, session);
+
+        String note = session.map(TableSession::getNote).orElse(null);
+        List<OrderResponse> orders = fetchOrders(session);
+
+        return new KitchenTableDetailResponse(
+                summary.tableId(), summary.tableNumber(), summary.tableStatus(), summary.overviewStatus(),
+                summary.sessionId(), summary.openedAt(), summary.participantCount(), summary.billRequested(),
+                note, orders
         );
     }
 

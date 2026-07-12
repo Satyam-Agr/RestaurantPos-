@@ -7,6 +7,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "order_item")
@@ -40,4 +42,8 @@ public class OrderItem {
     @Column(name = "item_status", nullable = false)
     @Builder.Default
     private ItemStatus itemStatus = ItemStatus.PENDING;
+
+    @OneToMany(mappedBy = "orderItem", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<OrderItemSelectedOption> selectedOptions = new ArrayList<>();
 }

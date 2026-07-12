@@ -10,6 +10,7 @@ import java.util.Optional;
 
 public interface BillRepository extends JpaRepository<Bill, Long> {
     Optional<Bill> findByTableSessionAndPaidAtIsNull(TableSession tableSession);
+    Optional<Bill> findByTableSession(TableSession tableSession);
     List<Bill> findAllByPaidAtIsNull();
     List<Bill> findAllByGeneratedAtBetweenOrderByGeneratedAtDesc(Instant from, Instant to);
 }

@@ -1,5 +1,7 @@
 package com.restro.backend.service;
 
+import com.restro.backend.domain.CustomizationGroup;
+import com.restro.backend.domain.CustomizationOption;
 import com.restro.backend.domain.MenuCategory;
 import com.restro.backend.domain.MenuItem;
 import com.restro.backend.domain.StaffUser;
@@ -8,14 +10,26 @@ import com.restro.backend.dto.AdminMenuItemResponse;
 import com.restro.backend.dto.CategoryIdsRequest;
 import com.restro.backend.dto.CreateCategoriesBatchRequest;
 import com.restro.backend.dto.CreateCategoryRequest;
+import com.restro.backend.dto.CreateCustomizationGroupRequest;
+import com.restro.backend.dto.CreateCustomizationGroupsBatchRequest;
+import com.restro.backend.dto.CreateCustomizationOptionRequest;
+import com.restro.backend.dto.CreateCustomizationOptionsBatchRequest;
 import com.restro.backend.dto.CreateMenuItemRequest;
 import com.restro.backend.dto.CreateMenuItemsBatchRequest;
+import com.restro.backend.dto.CustomizationGroupIdsRequest;
+import com.restro.backend.dto.CustomizationGroupResponse;
+import com.restro.backend.dto.CustomizationOptionIdsRequest;
+import com.restro.backend.dto.CustomizationOptionResponse;
 import com.restro.backend.dto.ItemIdsRequest;
 import com.restro.backend.dto.UpdateCategoryRequest;
+import com.restro.backend.dto.UpdateCustomizationGroupRequest;
+import com.restro.backend.dto.UpdateCustomizationOptionRequest;
 import com.restro.backend.dto.UpdateItemAvailabilityRequest;
 import com.restro.backend.dto.UpdateMenuItemRequest;
 import com.restro.backend.exception.ConflictException;
 import com.restro.backend.exception.NotFoundException;
+import com.restro.backend.repository.CustomizationGroupRepository;
+import com.restro.backend.repository.CustomizationOptionRepository;
 import com.restro.backend.repository.MenuCategoryRepository;
 import com.restro.backend.repository.MenuItemRepository;
 import com.restro.backend.repository.OrderItemRepository;
@@ -32,6 +46,8 @@ public class AdminMenuService {
     private final MenuCategoryRepository menuCategoryRepository;
     private final MenuItemRepository menuItemRepository;
     private final OrderItemRepository orderItemRepository;
+    private final CustomizationGroupRepository customizationGroupRepository;
+    private final CustomizationOptionRepository customizationOptionRepository;
     private final AdminService adminService;
 
     @Transactional(readOnly = true)
@@ -109,6 +125,8 @@ public class AdminMenuService {
                 .price(request.price())
                 .imageUrl(request.imageUrl())
                 .available(request.available() == null || request.available())
+                .dietaryType(request.dietaryType())
+                .allergens(request.allergens())
                 .build();
     }
 
@@ -130,6 +148,12 @@ public class AdminMenuService {
         }
         if (request.imageUrl() != null) {
             item.setImageUrl(request.imageUrl());
+        }
+        if (request.dietaryType() != null) {
+            item.setDietaryType(request.dietaryType());
+        }
+        if (request.allergens() != null) {
+            item.setAllergens(request.allergens());
         }
         return toResponse(menuItemRepository.save(item));
     }
@@ -158,6 +182,108 @@ public class AdminMenuService {
         menuItemRepository.deleteAll(items);
     }
 
+    @Transactional
+    public List<CustomizationGroupResponse> createCustomizationGroups(Long itemId, CreateCustomizationGroupsBatchRequest request, StaffUser actingAdmin) {
+        adminService.verifyPin(actingAdmin, request.pin());
+        MenuItem item = requireItem(itemId);
+        return request.groups().stream()
+                .map(g -> buildGroup(item, g))
+                .map(customizationGroupRepository::save)
+                .map(this::toGroupResponse)
+                .toList();
+    }
+
+    private CustomizationGroup buildGroup(MenuItem item, CreateCustomizationGroupRequest request) {
+        CustomizationGroup group = CustomizationGroup.builder()
+                .menuItem(item)
+                .name(request.name())
+                .type(request.type())
+                .required(request.required())
+                .build();
+        request.options().forEach(o -> group.getOptions().add(buildOption(group, o)));
+        return group;
+    }
+
+    @Transactional
+    public CustomizationGroupResponse updateCustomizationGroup(Long groupId, UpdateCustomizationGroupRequest request, StaffUser actingAdmin) {
+        adminService.verifyPin(actingAdmin, request.pin());
+        CustomizationGroup group = requireGroup(groupId);
+        if (request.name() != null) {
+            group.setName(request.name());
+        }
+        if (request.type() != null) {
+            group.setType(request.type());
+        }
+        if (request.required() != null) {
+            group.setRequired(request.required());
+        }
+        return toGroupResponse(customizationGroupRepository.save(group));
+    }
+
+    @Transactional
+    public void deleteCustomizationGroups(CustomizationGroupIdsRequest request, StaffUser actingAdmin) {
+        adminService.verifyPin(actingAdmin, request.pin());
+        List<CustomizationGroup> groups = request.groupIds().stream().map(this::requireGroup).toList();
+        customizationGroupRepository.deleteAll(groups);
+    }
+
+    @Transactional
+    public List<CustomizationOptionResponse> createCustomizationOptions(Long groupId, CreateCustomizationOptionsBatchRequest request, StaffUser actingAdmin) {
+        adminService.verifyPin(actingAdmin, request.pin());
+        CustomizationGroup group = requireGroup(groupId);
+        return request.options().stream()
+                .map(o -> buildOption(group, o))
+                .map(customizationOptionRepository::save)
+                .map(o -> new CustomizationOptionResponse(o.getId(), o.getName(), o.getPriceDelta()))
+                .toList();
+    }
+
+    private CustomizationOption buildOption(CustomizationGroup group, CreateCustomizationOptionRequest request) {
+        return CustomizationOption.builder()
+                .group(group)
+                .name(request.name())
+                .priceDelta(request.priceDelta())
+                .build();
+    }
+
+    @Transactional
+    public CustomizationOptionResponse updateCustomizationOption(Long optionId, UpdateCustomizationOptionRequest request, StaffUser actingAdmin) {
+        adminService.verifyPin(actingAdmin, request.pin());
+        CustomizationOption option = requireOption(optionId);
+        if (request.name() != null) {
+            option.setName(request.name());
+        }
+        if (request.priceDelta() != null) {
+            option.setPriceDelta(request.priceDelta());
+        }
+        option = customizationOptionRepository.save(option);
+        return new CustomizationOptionResponse(option.getId(), option.getName(), option.getPriceDelta());
+    }
+
+    @Transactional
+    public void deleteCustomizationOptions(CustomizationOptionIdsRequest request, StaffUser actingAdmin) {
+        adminService.verifyPin(actingAdmin, request.pin());
+        List<CustomizationOption> options = request.optionIds().stream().map(this::requireOption).toList();
+        customizationOptionRepository.deleteAll(options);
+    }
+
+    private CustomizationGroup requireGroup(Long groupId) {
+        return customizationGroupRepository.findById(groupId)
+                .orElseThrow(() -> new NotFoundException("Customization group " + groupId + " not found"));
+    }
+
+    private CustomizationOption requireOption(Long optionId) {
+        return customizationOptionRepository.findById(optionId)
+                .orElseThrow(() -> new NotFoundException("Customization option " + optionId + " not found"));
+    }
+
+    private CustomizationGroupResponse toGroupResponse(CustomizationGroup group) {
+        List<CustomizationOptionResponse> options = group.getOptions().stream()
+                .map(o -> new CustomizationOptionResponse(o.getId(), o.getName(), o.getPriceDelta()))
+                .toList();
+        return new CustomizationGroupResponse(group.getId(), group.getName(), group.getType(), group.isRequired(), options);
+    }
+
     private MenuCategory requireCategory(Long categoryId) {
         return menuCategoryRepository.findById(categoryId)
                 .orElseThrow(() -> new NotFoundException("Menu category " + categoryId + " not found"));
@@ -173,9 +299,13 @@ public class AdminMenuService {
     }
 
     private AdminMenuItemResponse toResponse(MenuItem item) {
+        List<CustomizationGroupResponse> groups = customizationGroupRepository.findAllByMenuItemOrderBySortOrderAsc(item).stream()
+                .map(this::toGroupResponse)
+                .toList();
         return new AdminMenuItemResponse(
                 item.getId(), item.getCategory().getId(), item.getCategory().getName(),
-                item.getName(), item.getDescription(), item.getPrice(), item.getImageUrl(), item.isAvailable()
+                item.getName(), item.getDescription(), item.getPrice(), item.getImageUrl(), item.isAvailable(),
+                item.getDietaryType(), item.getAllergens(), groups
         );
     }
 }

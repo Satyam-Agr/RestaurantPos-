@@ -30,7 +30,7 @@ public class CartService {
     @Transactional(readOnly = true)
     public OrderResponse getCart(String sessionToken) {
         TableSession session = sessionService.getActiveSessionByToken(sessionToken);
-        return orderMapper.toResponse(getCartOrder(session));
+        return orderMapper.toCustomerResponse(getCartOrder(session));
     }
 
     @Transactional
@@ -45,14 +45,7 @@ public class CartService {
             throw new ConflictException("Menu item '" + menuItem.getName() + "' is currently unavailable");
         }
 
-        OrderItem item = OrderItem.builder()
-                .order(cart)
-                .menuItem(menuItem)
-                .quantity(request.quantity())
-                .unitPrice(menuItem.getPrice())
-                .notes(request.notes())
-                .itemStatus(ItemStatus.PENDING)
-                .build();
+        OrderItem item = orderService.buildOrderItem(cart, menuItem, request.quantity(), request.selectedOptionIds(), ItemStatus.PENDING);
         cart.getItems().add(item);
         customerOrderRepository.save(cart);
 
@@ -68,13 +61,8 @@ public class CartService {
 
         if (request.quantity() != null && request.quantity() <= 0) {
             cart.getItems().remove(item);
-        } else {
-            if (request.quantity() != null) {
-                item.setQuantity(request.quantity());
-            }
-            if (request.notes() != null) {
-                item.setNotes(request.notes());
-            }
+        } else if (request.quantity() != null) {
+            item.setQuantity(request.quantity());
         }
         customerOrderRepository.save(cart);
 
@@ -107,22 +95,21 @@ public class CartService {
         customerOrderRepository.save(cart);
         orderService.logEvent(cart, OrderStatus.CART, OrderStatus.PLACED, null);
 
-        OrderResponse placedResponse = orderMapper.toResponse(cart);
-        broadcaster.notifyWaiter(placedResponse);
+        broadcaster.notifyWaiter(orderMapper.toResponse(cart));
 
         CustomerOrder freshCart = CustomerOrder.builder()
                 .tableSession(session)
                 .status(OrderStatus.CART)
                 .build();
         freshCart = customerOrderRepository.save(freshCart);
-        broadcaster.notifyCart(session.getId(), orderMapper.toResponse(freshCart));
+        broadcaster.notifyCart(session.getId(), orderMapper.toCustomerResponse(freshCart));
         tableOverviewService.refreshAndBroadcast(session);
 
-        return placedResponse;
+        return orderMapper.toCustomerResponse(cart);
     }
 
     private OrderResponse broadcastCart(Long sessionId, CustomerOrder cart) {
-        OrderResponse response = orderMapper.toResponse(cart);
+        OrderResponse response = orderMapper.toCustomerResponse(cart);
         broadcaster.notifyCart(sessionId, response);
         return response;
     }

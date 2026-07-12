@@ -40,6 +40,17 @@ public class Bill {
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal total;
 
+    // Nullable, not defaulted at the DB level (additive column on an already-seeded table) —
+    // treat null as zero wherever read, same null-safe pattern as RestaurantTable.retired.
+    @Column(precision = 10, scale = 2)
+    private BigDecimal tip;
+
+    // Which waiter the tip is credited to — set at generate time alongside the tip amount itself.
+    // Nullable: a bill can have a tip with no recipient chosen, or no tip at all.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "tip_recipient_id")
+    private StaffUser tipRecipient;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "payment_method")
     private PaymentMethod paymentMethod;
@@ -54,7 +65,21 @@ public class Bill {
     @Column(name = "paid_at")
     private Instant paidAt;
 
+    @Column(name = "voided_at")
+    private Instant voidedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "voided_by")
+    private StaffUser voidedBy;
+
+    @Column(name = "void_reason")
+    private String voidReason;
+
     @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<BillLineItem> lineItems = new ArrayList<>();
+
+    @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<BillPayment> payments = new ArrayList<>();
 }

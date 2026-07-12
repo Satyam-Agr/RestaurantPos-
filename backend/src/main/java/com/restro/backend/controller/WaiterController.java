@@ -3,6 +3,8 @@ package com.restro.backend.controller;
 import com.restro.backend.dto.OrderResponse;
 import com.restro.backend.dto.QuantityUpdateRequest;
 import com.restro.backend.dto.SessionResponse;
+import com.restro.backend.dto.SetItemNoteRequest;
+import com.restro.backend.dto.SetTableNoteRequest;
 import com.restro.backend.dto.StaffOrderRequest;
 import com.restro.backend.dto.TableSummaryResponse;
 import com.restro.backend.dto.WaiterTableDetailResponse;
@@ -50,6 +52,11 @@ public class WaiterController {
         return sessionService.createStaffSession(tableId);
     }
 
+    @PatchMapping("/tables/{tableId}/note")
+    public void setTableNote(@PathVariable Long tableId, @RequestBody SetTableNoteRequest request) {
+        sessionService.setTableNote(tableId, request.note());
+    }
+
     @PostMapping("/tables/{tableId}/orders")
     public OrderResponse placeOrder(
             @PathVariable Long tableId,
@@ -77,6 +84,15 @@ public class WaiterController {
     @PatchMapping("/order-items/{itemId}/serve")
     public OrderResponse markServed(@PathVariable Long itemId, @AuthenticationPrincipal StaffUserDetails principal) {
         return waiterService.markItemServed(itemId, principal.staffUser());
+    }
+
+    @PatchMapping("/order-items/{itemId}/note")
+    public OrderResponse setItemNote(
+            @PathVariable Long itemId,
+            @RequestBody SetItemNoteRequest request,
+            @AuthenticationPrincipal StaffUserDetails principal
+    ) {
+        return orderService.setItemNote(itemId, request.note(), principal.staffUser());
     }
 
     @DeleteMapping("/orders/{orderId}/items/{itemId}")

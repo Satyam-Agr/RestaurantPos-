@@ -46,4 +46,7 @@ public class TableSession {
 
     @Column(name = "closed_at")
     private Instant closedAt;
+
+    // Waiter-only annotation for this dining session (e.g. "birthday, bring a candle") — never customer-writable.
+    private String note;
 }

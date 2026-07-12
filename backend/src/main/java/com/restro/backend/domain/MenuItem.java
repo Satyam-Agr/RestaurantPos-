@@ -38,4 +38,10 @@ public class MenuItem {
     @Column(name = "is_available", nullable = false)
     @Builder.Default
     private boolean available = true;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "dietary_type")
+    private DietaryType dietaryType;
+
+    private String allergens;
 }
