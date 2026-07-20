@@ -45,12 +45,6 @@ public class Bill {
     @Column(precision = 10, scale = 2)
     private BigDecimal tip;
 
-    // Which waiter the tip is credited to — set at generate time alongside the tip amount itself.
-    // Nullable: a bill can have a tip with no recipient chosen, or no tip at all.
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "tip_recipient_id")
-    private StaffUser tipRecipient;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "payment_method")
     private PaymentMethod paymentMethod;

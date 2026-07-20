@@ -13,6 +13,7 @@ import com.restro.backend.dto.OrderStatusEventResponse;
 import com.restro.backend.dto.ParticipantResponse;
 import com.restro.backend.dto.TableIdsRequest;
 import com.restro.backend.dto.TableManagementResponse;
+import com.restro.backend.dto.TipPoolEntryResponse;
 import com.restro.backend.dto.UpdateTableRequest;
 import com.restro.backend.exception.ConflictException;
 import com.restro.backend.exception.NotFoundException;
@@ -75,6 +76,11 @@ public class AdminTableService {
     @Transactional(readOnly = true)
     public List<BillResponse> getBillHistory(Instant from, Instant to) {
         return billService.getBillHistory(from != null ? from : Instant.EPOCH, to != null ? to : Instant.now());
+    }
+
+    @Transactional(readOnly = true)
+    public List<TipPoolEntryResponse> getTipPool(Instant from, Instant to) {
+        return billService.getTipPool(from != null ? from : Instant.EPOCH, to != null ? to : Instant.now());
     }
 
     @Transactional(readOnly = true)

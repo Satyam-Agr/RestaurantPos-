@@ -6,8 +6,6 @@ import java.math.BigDecimal;
 
 public record GenerateBillRequest(
         @NotNull BigDecimal taxRatePercent,
-        @NotNull BigDecimal discount,
-        BigDecimal tip,
-        Long tipRecipientStaffId
+        @NotNull BigDecimal discount
 ) {
 }

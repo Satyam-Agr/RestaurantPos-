@@ -11,15 +11,15 @@ import com.restro.backend.dto.OrderResponse;
 import com.restro.backend.dto.PayBillRequest;
 import com.restro.backend.dto.PaySplitBillRequest;
 import com.restro.backend.dto.PaymentEntryRequest;
-import com.restro.backend.dto.StaffOptionResponse;
+import com.restro.backend.dto.TipPoolEntryResponse;
 import com.restro.backend.dto.VoidBillRequest;
 import com.restro.backend.exception.ConflictException;
 import com.restro.backend.exception.NotFoundException;
 import com.restro.backend.repository.BillRepository;
 import com.restro.backend.repository.CustomerOrderRepository;
 import com.restro.backend.repository.RestaurantTableRepository;
-import com.restro.backend.repository.StaffUserRepository;
 import com.restro.backend.repository.TableSessionRepository;
+import com.restro.backend.repository.TipPoolEntryRepository;
 import com.restro.backend.ws.OrderEventBroadcaster;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -44,7 +44,7 @@ public class BillService {
     private final RestaurantTableRepository restaurantTableRepository;
     private final CustomerOrderRepository customerOrderRepository;
     private final BillRepository billRepository;
-    private final StaffUserRepository staffUserRepository;
+    private final TipPoolEntryRepository tipPoolEntryRepository;
     private final OrderService orderService;
     private final SessionService sessionService;
     private final TableOverviewService tableOverviewService;
@@ -153,36 +153,35 @@ public class BillService {
 
         BigDecimal tax = subtotal.multiply(request.taxRatePercent()).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
         BigDecimal discount = request.discount();
-        BigDecimal tip = request.tip() != null ? request.tip() : BigDecimal.ZERO;
-        BigDecimal total = subtotal.add(tax).subtract(discount).add(tip);
-
-        StaffUser tipRecipient = null;
-        if (request.tipRecipientStaffId() != null) {
-            tipRecipient = staffUserRepository.findById(request.tipRecipientStaffId())
-                    .filter(s -> s.getRole() == StaffRole.WAITER && s.isActive())
-                    .orElseThrow(() -> new NotFoundException("No active waiter found with id " + request.tipRecipientStaffId()));
-        }
+        BigDecimal total = subtotal.add(tax).subtract(discount);
 
         Bill bill = billRepository.findByTableSessionAndPaidAtIsNull(session).orElseGet(Bill::new);
         bill.setTableSession(session);
         bill.setSubtotal(subtotal);
         bill.setTax(tax);
         bill.setDiscount(discount);
-        bill.setTip(tip);
-        bill.setTipRecipient(tipRecipient);
         bill.setTotal(total);
         bill.setGeneratedAt(Instant.now());
         for (OrderItem item : billableItems) {
             String customizationSummary = item.getSelectedOptions().isEmpty() ? null
                     : item.getSelectedOptions().stream().map(OrderItemSelectedOption::getOptionName).collect(Collectors.joining(", "));
-            bill.getLineItems().add(BillLineItem.builder()
+            BillLineItem lineItem = BillLineItem.builder()
                     .bill(bill)
                     .menuItemName(item.getMenuItem().getName())
                     .quantity(item.getQuantity())
                     .unitPrice(item.getUnitPrice())
                     .lineTotal(item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
                     .customizationSummary(customizationSummary)
-                    .build());
+                    .dietaryType(item.getMenuItem().getDietaryType())
+                    .build();
+            for (OrderItemSelectedOption selected : item.getSelectedOptions()) {
+                lineItem.getOptions().add(BillLineItemOption.builder()
+                        .billLineItem(lineItem)
+                        .optionName(selected.getOptionName())
+                        .priceDelta(selected.getPriceDelta())
+                        .build());
+            }
+            bill.getLineItems().add(lineItem);
         }
         bill = billRepository.save(bill);
 
@@ -203,6 +202,8 @@ public class BillService {
     public BillResponse payBill(Long billId, PayBillRequest request, StaffUser cashier) {
         Bill bill = requirePayableBill(billId);
 
+        BigDecimal tip = request.tip() != null ? request.tip() : BigDecimal.ZERO;
+        applyTip(bill, tip);
         bill.setPaymentMethod(request.paymentMethod());
         bill.getPayments().add(BillPayment.builder()
                 .bill(bill)
@@ -217,6 +218,9 @@ public class BillService {
     @Transactional
     public BillResponse payBillSplit(Long billId, PaySplitBillRequest request, StaffUser cashier) {
         Bill bill = requirePayableBill(billId);
+
+        BigDecimal tip = request.tip() != null ? request.tip() : BigDecimal.ZERO;
+        applyTip(bill, tip);
 
         BigDecimal sum = request.payments().stream().map(PaymentEntryRequest::amount).reduce(BigDecimal.ZERO, BigDecimal::add);
         if (sum.compareTo(bill.getTotal()) != 0) {
@@ -267,6 +271,11 @@ public class BillService {
         return bill;
     }
 
+    private void applyTip(Bill bill, BigDecimal tip) {
+        bill.setTip(tip);
+        bill.setTotal(bill.getSubtotal().add(bill.getTax()).subtract(bill.getDiscount()).add(tip));
+    }
+
     // Shared tail for both the single-method and split-payment paths.
     private BillResponse finalizePayment(Bill bill, StaffUser cashier) {
         bill.setClosedBy(cashier);
@@ -276,6 +285,16 @@ public class BillService {
         TableSession session = bill.getTableSession();
         if (session.getStatus() != SessionStatus.CLOSED) {
             sessionService.closeSessionAndFreeTable(session);
+        }
+
+        if (bill.getTip() != null && bill.getTip().compareTo(BigDecimal.ZERO) > 0) {
+            tipPoolEntryRepository.save(TipPoolEntry.builder()
+                    .billId(bill.getId())
+                    .sessionId(session.getId())
+                    .tableNumber(session.getTable().getTableNumber())
+                    .amount(bill.getTip())
+                    .recordedAt(Instant.now())
+                    .build());
         }
 
         BillResponse response = toResponse(bill);
@@ -297,9 +316,9 @@ public class BillService {
     }
 
     @Transactional(readOnly = true)
-    public List<StaffOptionResponse> listTipEligibleWaiters() {
-        return staffUserRepository.findAllByRoleAndActiveTrue(StaffRole.WAITER).stream()
-                .map(s -> new StaffOptionResponse(s.getId(), s.getName()))
+    public List<TipPoolEntryResponse> getTipPool(Instant from, Instant to) {
+        return tipPoolEntryRepository.findAllByRecordedAtBetweenOrderByRecordedAtAsc(from, to).stream()
+                .map(e -> new TipPoolEntryResponse(e.getId(), e.getBillId(), e.getSessionId(), e.getTableNumber(), e.getAmount(), e.getRecordedAt()))
                 .toList();
     }
 
@@ -327,7 +346,6 @@ public class BillService {
                 bill.getTax(),
                 bill.getDiscount(),
                 bill.getTip() != null ? bill.getTip() : BigDecimal.ZERO,
-                bill.getTipRecipient() != null ? bill.getTipRecipient().getName() : null,
                 bill.getTotal(),
                 bill.getPaymentMethod(),
                 bill.getGeneratedAt(),

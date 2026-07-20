@@ -5,7 +5,6 @@ import com.restro.backend.dto.BillResponse;
 import com.restro.backend.dto.GenerateBillRequest;
 import com.restro.backend.dto.PayBillRequest;
 import com.restro.backend.dto.PaySplitBillRequest;
-import com.restro.backend.dto.StaffOptionResponse;
 import com.restro.backend.dto.VoidBillRequest;
 import com.restro.backend.security.StaffUserDetails;
 import com.restro.backend.service.BillService;
@@ -31,11 +30,6 @@ public class BillController {
     @GetMapping("/requested")
     public List<BillRequestSummary> getRequested() {
         return billService.getBillRequestedSessions();
-    }
-
-    @GetMapping("/waiters")
-    public List<StaffOptionResponse> getTipEligibleWaiters() {
-        return billService.listTipEligibleWaiters();
     }
 
     @PatchMapping("/{sessionId}/revert")

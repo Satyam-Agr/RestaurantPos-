@@ -9,6 +9,7 @@ import com.restro.backend.dto.PinVerificationRequest;
 import com.restro.backend.dto.TableIdsRequest;
 import com.restro.backend.dto.TableManagementResponse;
 import com.restro.backend.dto.TableSummaryResponse;
+import com.restro.backend.dto.TipPoolEntryResponse;
 import com.restro.backend.dto.UpdateTableRequest;
 import com.restro.backend.security.StaffUserDetails;
 import com.restro.backend.service.AdminTableService;
@@ -101,5 +102,13 @@ public class AdminTableController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to
     ) {
         return adminTableService.getBillHistory(from, to);
+    }
+
+    @GetMapping("/tip-pool")
+    public List<TipPoolEntryResponse> getTipPool(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to
+    ) {
+        return adminTableService.getTipPool(from, to);
     }
 }

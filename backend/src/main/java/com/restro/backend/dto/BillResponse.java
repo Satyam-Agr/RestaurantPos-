@@ -14,7 +14,6 @@ public record BillResponse(
         BigDecimal tax,
         BigDecimal discount,
         BigDecimal tip,
-        String tipRecipientName,
         BigDecimal total,
         PaymentMethod paymentMethod,
         Instant generatedAt,
