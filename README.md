@@ -73,9 +73,15 @@ RestaurantPos/
 
 1. **Configure Database**
    ```bash
-   # Create database
-   mysql -u root -p -e "CREATE DATABASE projectDB;"
+   # Create the schema and insert the documented starter data
+   mysql -u root -p < database/init.sql
    ```
+
+
+   The initializer creates `projectDB`, all application tables, T1-T5, the
+   starter menu, and the four documented staff accounts. It can be rerun
+   safely because existing tables and seed rows are left unchanged. Change the
+   default staff passwords before using a shared or production environment.
 
 2. **Configure Application**
    Edit `backend/src/main/resources/application.yml`:
